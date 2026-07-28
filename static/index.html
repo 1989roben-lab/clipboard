@@ -1,0 +1,1488 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#152f2a" />
+    <title>局域网内容中转站</title>
+    <style>
+      :root {
+        --ink: #18302c;
+        --muted: #697873;
+        --paper: #f7f4ed;
+        --card: rgba(255, 255, 255, 0.84);
+        --line: #d9ded8;
+        --green: #1e5b4f;
+        --green-dark: #15463d;
+        --danger: #a43e35;
+        --shadow: 0 16px 40px rgba(36, 54, 49, 0.09);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 8% 3%, #e0eadf 0, transparent 32rem),
+          radial-gradient(circle at 94% 18%, #efe0c8 0, transparent 28rem),
+          var(--paper);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      button,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        touch-action: manipulation;
+      }
+
+      .shell {
+        width: min(960px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 56px 0 72px;
+      }
+
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 28px;
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--green);
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+        font-size: clamp(34px, 6vw, 58px);
+        font-weight: 600;
+        letter-spacing: -0.035em;
+        line-height: 1.02;
+      }
+
+      .subtitle {
+        max-width: 440px;
+        margin: 13px 0 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      .status-pill {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 13px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.62);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #32a06f;
+        box-shadow: 0 0 0 4px rgba(50, 160, 111, 0.13);
+      }
+
+      .composer {
+        padding: 22px;
+        border: 1px solid rgba(202, 211, 204, 0.9);
+        border-radius: 20px;
+        background: var(--card);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(14px);
+      }
+
+      label {
+        display: block;
+        margin-bottom: 10px;
+        font-size: 14px;
+        font-weight: 750;
+      }
+
+      .rich-editor {
+        overflow: auto;
+        width: 100%;
+        min-height: 250px;
+        max-height: 620px;
+        padding: 16px;
+        border: 1px solid #cbd3cd;
+        border-radius: 13px;
+        outline: none;
+        background: #fff;
+        color: #1d2926;
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 14px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        tab-size: 4;
+        transition:
+          border-color 150ms ease,
+          box-shadow 150ms ease;
+      }
+
+      .rich-editor:focus,
+      .rich-editor.dragging {
+        border-color: #5e8d80;
+        box-shadow: 0 0 0 4px rgba(54, 118, 100, 0.12);
+      }
+
+      .rich-editor:empty::before {
+        color: #98a29e;
+        content: attr(data-placeholder);
+        pointer-events: none;
+      }
+
+      .inline-draft-image {
+        position: relative;
+        display: grid;
+        width: fit-content;
+        max-width: 100%;
+        margin: 10px 0;
+        place-items: center;
+        border-radius: 12px;
+        background: #f1f4f1;
+      }
+
+      .inline-draft-image img {
+        display: block;
+        max-width: 100%;
+        max-height: 360px;
+        border-radius: 12px;
+        object-fit: contain;
+      }
+
+      .inline-draft-remove {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        display: grid;
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        border-radius: 50%;
+        background: rgba(31, 43, 39, 0.78);
+        color: #fff;
+        cursor: pointer;
+        font-size: 19px;
+        font-weight: 400;
+        line-height: 1;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+      }
+
+      .inline-draft-remove:hover {
+        background: rgba(134, 48, 41, 0.92);
+      }
+
+      .composer-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 14px;
+      }
+
+      .composer-tools {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 5px;
+      }
+
+      .choose-image {
+        padding: 7px 10px;
+        border: 1px solid #cbd8d1;
+        border-radius: 9px;
+        background: #f3f7f4;
+        color: var(--green);
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .choose-image:hover {
+        background: #e8f1ec;
+      }
+
+      .camera-button {
+        display: none;
+      }
+
+      #image-input,
+      #camera-input {
+        display: none;
+      }
+
+      .hint,
+      .counter {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .counter.over {
+        color: var(--danger);
+        font-weight: 700;
+      }
+
+      .primary,
+      .secondary,
+      .danger,
+      .icon-button {
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 720;
+        transition:
+          background-color 150ms ease,
+          transform 100ms ease,
+          opacity 150ms ease;
+      }
+
+      button:active {
+        transform: translateY(1px);
+      }
+
+      button:focus-visible {
+        outline: 3px solid rgba(45, 119, 98, 0.3);
+        outline-offset: 2px;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .primary {
+        min-width: 128px;
+        padding: 12px 18px;
+        background: var(--green);
+        color: #fff;
+      }
+
+      .primary:hover:not(:disabled) {
+        background: var(--green-dark);
+      }
+
+      .history-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        margin: 40px 0 15px;
+      }
+
+      .history-title {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+
+      h2 {
+        margin: 0;
+        font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+        font-size: 25px;
+        font-weight: 600;
+      }
+
+      .count {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .danger {
+        padding: 8px 11px;
+        background: transparent;
+        color: var(--danger);
+        font-size: 13px;
+      }
+
+      .danger:hover:not(:disabled) {
+        background: rgba(164, 62, 53, 0.08);
+      }
+
+      .history {
+        display: grid;
+        gap: 14px;
+      }
+
+      .entry {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.76);
+        box-shadow: 0 8px 24px rgba(44, 60, 55, 0.045);
+      }
+
+      .entry-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 11px 14px;
+        border-bottom: 1px solid #e5e8e4;
+        background: rgba(238, 242, 237, 0.6);
+      }
+
+      .meta-left {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+      }
+
+      .kind-badge {
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: #dceae3;
+        color: var(--green);
+        font-size: 11px;
+        font-weight: 760;
+      }
+
+      time {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .entry-actions {
+        display: flex;
+        gap: 6px;
+      }
+
+      .secondary,
+      .icon-button,
+      .secondary-link {
+        padding: 7px 10px;
+        border: 0;
+        border-radius: 10px;
+        background: #fff;
+        color: var(--green);
+        box-shadow: inset 0 0 0 1px #d2dad4;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 720;
+        text-decoration: none;
+      }
+
+      .secondary:hover,
+      .icon-button:hover,
+      .secondary-link:hover {
+        background: #edf4f0;
+      }
+
+      .icon-button {
+        color: var(--danger);
+      }
+
+      pre {
+        overflow: auto;
+        max-height: 480px;
+        margin: 0;
+        padding: 18px;
+        color: #24322f;
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 13px;
+        line-height: 1.65;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        tab-size: 4;
+      }
+
+      .image-content {
+        padding: 14px;
+      }
+
+      .image-preview-link {
+        display: grid;
+        overflow: hidden;
+        width: 100%;
+        min-height: 180px;
+        max-height: 520px;
+        place-items: center;
+        border-radius: 12px;
+        background:
+          linear-gradient(45deg, #eef1ed 25%, transparent 25%),
+          linear-gradient(-45deg, #eef1ed 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #eef1ed 75%),
+          linear-gradient(-45deg, transparent 75%, #eef1ed 75%),
+          #f8f9f6;
+        background-position:
+          0 0,
+          0 8px,
+          8px -8px,
+          -8px 0;
+        background-size: 16px 16px;
+      }
+
+      .image-preview {
+        display: block;
+        width: 100%;
+        max-height: 520px;
+        object-fit: contain;
+      }
+
+      .image-details {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 12px 3px 1px;
+      }
+
+      .image-caption {
+        max-height: 260px;
+        margin: 12px 0;
+        padding: 13px 14px;
+        border: 1px solid #e1e7e2;
+        border-radius: 10px;
+        background: #f7f9f7;
+      }
+
+      .image-caption.before-image {
+        margin-top: 0;
+      }
+
+      .file-name {
+        overflow: hidden;
+        margin: 0 0 3px;
+        font-size: 13px;
+        font-weight: 720;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .file-size {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .empty,
+      .loading {
+        padding: 46px 20px;
+        border: 1px dashed #c7d0c9;
+        border-radius: 16px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .empty strong {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--ink);
+        font-size: 16px;
+      }
+
+      .toast {
+        position: fixed;
+        right: 22px;
+        bottom: 22px;
+        z-index: 10;
+        max-width: min(360px, calc(100vw - 44px));
+        padding: 12px 16px;
+        border-radius: 11px;
+        background: #173d34;
+        color: #fff;
+        box-shadow: 0 12px 30px rgba(19, 47, 41, 0.25);
+        font-size: 14px;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(10px);
+        transition:
+          opacity 180ms ease,
+          transform 180ms ease;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .toast.error {
+        background: #84352e;
+      }
+
+      @media (hover: none) and (pointer: coarse) {
+        .camera-button {
+          display: inline-block;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          width: min(100% - 22px, 960px);
+          padding: 30px 0 48px;
+        }
+
+        header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .composer {
+          padding: 15px;
+          border-radius: 16px;
+        }
+
+        .rich-editor {
+          min-height: 270px;
+        }
+
+        .composer-footer {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .primary {
+          width: 100%;
+        }
+
+        .entry-meta {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .entry-actions {
+          width: 100%;
+          flex-wrap: wrap;
+        }
+
+        .image-details {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div>
+          <p class="eyebrow">LAN Clipboard · 8016</p>
+          <h1>局域网内容中转站</h1>
+          <p class="subtitle">
+            在这里保存整段命令或图片，再从同一局域网里的 Windows
+            电脑复制或下载。记录会保留在这台 Mac 上。
+          </p>
+        </div>
+        <div class="status-pill" aria-label="服务状态正常">
+          <span class="status-dot"></span>
+          局域网在线
+        </div>
+      </header>
+
+      <section class="composer" aria-labelledby="composer-label">
+        <label id="composer-label" for="content">准备要传送的内容</label>
+        <div
+          class="rich-editor"
+          id="content"
+          contenteditable="true"
+          role="textbox"
+          aria-multiline="true"
+          aria-label="输入文字或粘贴图片"
+          data-placeholder="输入文字，或直接在这里粘贴图片……"
+          spellcheck="false"
+        ></div>
+        <div class="composer-footer">
+          <div>
+            <div class="composer-tools">
+              <button class="choose-image" id="choose-image" type="button">
+                选择图片
+              </button>
+              <button
+                class="choose-image camera-button"
+                id="take-photo"
+                type="button"
+              >
+                拍摄照片
+              </button>
+              <span class="hint">也可粘贴或拖入图片</span>
+            </div>
+            <div class="counter" id="counter">0 B / 200 KB</div>
+          </div>
+          <button class="primary" id="save-button" type="button">
+            保存到中转站
+          </button>
+        </div>
+        <input
+          id="image-input"
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+        />
+        <input
+          id="camera-input"
+          type="file"
+          accept="image/*"
+          capture="environment"
+        />
+      </section>
+
+      <section aria-labelledby="history-title">
+        <div class="history-heading">
+          <div class="history-title">
+            <h2 id="history-title">历史内容</h2>
+            <span class="count" id="entry-count"></span>
+          </div>
+          <button class="danger" id="clear-button" type="button" disabled>
+            清空全部
+          </button>
+        </div>
+        <div class="history" id="history" aria-live="polite">
+          <div class="loading">正在读取内容……</div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      const MAX_BYTES = 200 * 1024;
+      const MAX_IMAGE_TEXT_BYTES = 12 * 1024;
+      const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+      const ALLOWED_IMAGE_TYPES = new Set([
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/gif",
+      ]);
+      const editor = document.querySelector("#content");
+      const saveButton = document.querySelector("#save-button");
+      const clearButton = document.querySelector("#clear-button");
+      const chooseImage = document.querySelector("#choose-image");
+      const takePhoto = document.querySelector("#take-photo");
+      const imageInput = document.querySelector("#image-input");
+      const cameraInput = document.querySelector("#camera-input");
+      const counter = document.querySelector("#counter");
+      const history = document.querySelector("#history");
+      const entryCount = document.querySelector("#entry-count");
+      const toast = document.querySelector("#toast");
+      const encoder = new TextEncoder();
+      let toastTimer;
+      let entries = [];
+      let pendingImage = null;
+      let pendingImageUrl = "";
+      let pendingImageNode = null;
+      let savedRange = null;
+      let savedCaretPosition = 0;
+      let filePickerPosition = null;
+
+      function byteLength(text) {
+        return encoder.encode(text).length;
+      }
+
+      function formatBytes(bytes) {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) {
+          return `${(bytes / 1024).toFixed(1)} KB`;
+        }
+        return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+      }
+
+      function serializeDraft(root) {
+        let content = "";
+        let imagePosition = null;
+        const blockTags = new Set(["DIV", "P"]);
+
+        function walk(parent) {
+          const children = Array.from(parent.childNodes);
+          children.forEach((node, index) => {
+            if (
+              node === pendingImageNode ||
+              (node.nodeType === Node.ELEMENT_NODE &&
+                node.classList.contains("inline-draft-image"))
+            ) {
+              imagePosition = Array.from(content).length;
+              return;
+            }
+            if (node.nodeType === Node.TEXT_NODE) {
+              content += node.nodeValue || "";
+              return;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+            if (node.tagName === "BR") {
+              content += "\n";
+              return;
+            }
+            walk(node);
+            if (
+              blockTags.has(node.tagName) &&
+              index < children.length - 1 &&
+              !content.endsWith("\n")
+            ) {
+              content += "\n";
+            }
+          });
+        }
+
+        walk(root);
+        return { content, imagePosition };
+      }
+
+      function readDraft() {
+        return serializeDraft(editor);
+      }
+
+      function updateCounter() {
+        const { content } = readDraft();
+        const bytes = byteLength(content);
+        const limit = pendingImage ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
+        counter.textContent =
+          `${formatBytes(bytes)} / ${pendingImage ? "12 KB（图片说明）" : "200 KB"}`;
+        counter.classList.toggle("over", bytes > limit);
+        saveButton.disabled =
+          saveButton.dataset.loading === "true" ||
+          (!content.trim() && !pendingImage) ||
+          bytes > limit;
+      }
+
+      function showToast(message, isError = false) {
+        clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.classList.toggle("error", isError);
+        toast.classList.add("show");
+        toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
+      }
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            "Content-Type": "application/json",
+            ...(options.headers || {}),
+          },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || `请求失败（${response.status}）`);
+        }
+        return data;
+      }
+
+      function formatTime(value) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return new Intl.DateTimeFormat("zh-CN", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        }).format(date);
+      }
+
+      async function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+
+        const helper = document.createElement("textarea");
+        helper.value = text;
+        helper.setAttribute("readonly", "");
+        helper.style.position = "fixed";
+        helper.style.left = "-9999px";
+        helper.style.opacity = "0";
+        document.body.appendChild(helper);
+        helper.select();
+        helper.setSelectionRange(0, helper.value.length);
+        const copied = document.execCommand("copy");
+        helper.remove();
+        if (!copied) throw new Error("浏览器未允许复制");
+      }
+
+      function entriesAreEqual(nextEntries) {
+        if (entries.length !== nextEntries.length) return false;
+        return entries.every((entry, index) => {
+          const next = nextEntries[index];
+          return (
+            entry.id === next.id &&
+            entry.created_at === next.created_at &&
+            entry.type === next.type &&
+            entry.content === next.content &&
+            entry.filename === next.filename &&
+            entry.mime_type === next.mime_type &&
+            entry.size_bytes === next.size_bytes &&
+            entry.image_position === next.image_position
+          );
+        });
+      }
+
+      function captureScrollState() {
+        const entryScroll = new Map();
+        document.querySelectorAll("pre[data-entry-id]").forEach((element) => {
+          entryScroll.set(element.dataset.entryId, {
+            top: element.scrollTop,
+            left: element.scrollLeft,
+          });
+        });
+        return {
+          pageX: window.scrollX,
+          pageY: window.scrollY,
+          entryScroll,
+        };
+      }
+
+      function restoreScrollState(state) {
+        if (!state) return;
+        requestAnimationFrame(() => {
+          window.scrollTo(state.pageX, state.pageY);
+          document.querySelectorAll("pre[data-entry-id]").forEach((element) => {
+            const saved = state.entryScroll.get(element.dataset.entryId);
+            if (saved) {
+              element.scrollTop = saved.top;
+              element.scrollLeft = saved.left;
+            }
+          });
+        });
+      }
+
+      function renderEntries({ preserveScroll = false } = {}) {
+        const scrollState = preserveScroll ? captureScrollState() : null;
+        history.replaceChildren();
+        entryCount.textContent = entries.length
+          ? `${entries.length} / 100 条`
+          : "0 条";
+        clearButton.disabled = entries.length === 0;
+
+        if (!entries.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          const title = document.createElement("strong");
+          title.textContent = "还没有保存内容";
+          const description = document.createElement("span");
+          description.textContent = "在上方粘贴文本，第一条记录会显示在这里。";
+          empty.append(title, description);
+          history.appendChild(empty);
+          return;
+        }
+
+        for (const entry of entries) {
+          const article = document.createElement("article");
+          article.className = "entry";
+
+          const meta = document.createElement("div");
+          meta.className = "entry-meta";
+
+          const metaLeft = document.createElement("div");
+          metaLeft.className = "meta-left";
+
+          const badge = document.createElement("span");
+          badge.className = "kind-badge";
+          badge.textContent =
+            entry.type === "image"
+              ? entry.content
+                ? "图文"
+                : "图片"
+              : "文字";
+
+          const time = document.createElement("time");
+          time.dateTime = entry.created_at;
+          time.textContent = formatTime(entry.created_at);
+          metaLeft.append(badge, time);
+
+          const actions = document.createElement("div");
+          actions.className = "entry-actions";
+
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "icon-button";
+          remove.textContent = "删除";
+          remove.setAttribute(
+            "aria-label",
+            `删除 ${entry.filename || time.textContent} 的记录`,
+          );
+          remove.addEventListener("click", () => deleteEntry(entry.id));
+
+          if (entry.type === "image") {
+            if (entry.content) {
+              const copy = document.createElement("button");
+              copy.type = "button";
+              copy.className = "secondary";
+              copy.textContent = "复制文字";
+              copy.addEventListener("click", async () => {
+                try {
+                  await copyText(entry.content);
+                  showToast("已复制附带文字");
+                } catch (error) {
+                  showToast(`复制失败：${error.message}`, true);
+                }
+              });
+              actions.append(copy);
+            }
+
+            const view = document.createElement("a");
+            view.className = "secondary-link";
+            view.href = `/api/images/${entry.id}`;
+            view.target = "_blank";
+            view.rel = "noopener";
+            view.textContent = "查看原图";
+
+            const download = document.createElement("a");
+            download.className = "secondary-link";
+            download.href = `/api/images/${entry.id}/download`;
+            download.textContent = "下载";
+
+            actions.append(view, download, remove);
+            meta.append(metaLeft, actions);
+
+            const imageContent = document.createElement("div");
+            imageContent.className = "image-content";
+            const contentCharacters = Array.from(entry.content || "");
+            const imagePosition = Math.max(
+              0,
+              Math.min(
+                Number.isInteger(entry.image_position)
+                  ? entry.image_position
+                  : 0,
+                contentCharacters.length,
+              ),
+            );
+            const beforeImage = contentCharacters
+              .slice(0, imagePosition)
+              .join("");
+            const afterImage = contentCharacters
+              .slice(imagePosition)
+              .join("");
+
+            function appendCaption(text, placement) {
+              if (!text) return;
+              const caption = document.createElement("pre");
+              caption.className = `image-caption ${placement}`;
+              caption.dataset.entryId = String(entry.id);
+              caption.textContent = text;
+              imageContent.append(caption);
+            }
+
+            const previewLink = document.createElement("a");
+            previewLink.className = "image-preview-link";
+            previewLink.href = `/api/images/${entry.id}`;
+            previewLink.target = "_blank";
+            previewLink.rel = "noopener";
+            previewLink.setAttribute(
+              "aria-label",
+              `查看原图：${entry.filename}`,
+            );
+
+            const image = document.createElement("img");
+            image.className = "image-preview";
+            image.src = `/api/images/${entry.id}`;
+            image.alt = entry.filename || "上传的图片";
+            image.loading = "lazy";
+            image.decoding = "async";
+
+            const details = document.createElement("div");
+            details.className = "image-details";
+            const fileInfo = document.createElement("div");
+            fileInfo.style.minWidth = "0";
+            const filename = document.createElement("p");
+            filename.className = "file-name";
+            filename.textContent = entry.filename || "图片";
+            const size = document.createElement("span");
+            size.className = "file-size";
+            size.textContent = formatBytes(entry.size_bytes || 0);
+            fileInfo.append(filename, size);
+            details.append(fileInfo);
+            previewLink.append(image);
+            appendCaption(beforeImage, "before-image");
+            imageContent.append(previewLink);
+            appendCaption(afterImage, "after-image");
+            imageContent.append(details);
+            article.append(meta, imageContent);
+          } else {
+            const copy = document.createElement("button");
+            copy.type = "button";
+            copy.className = "secondary";
+            copy.textContent = "复制";
+            copy.addEventListener("click", async () => {
+              try {
+                await copyText(entry.content);
+                showToast("已复制完整内容");
+              } catch (error) {
+                showToast(`复制失败：${error.message}`, true);
+              }
+            });
+
+            const content = document.createElement("pre");
+            content.dataset.entryId = String(entry.id);
+            content.textContent = entry.content;
+
+            actions.append(copy, remove);
+            meta.append(metaLeft, actions);
+            article.append(meta, content);
+          }
+          history.appendChild(article);
+        }
+        restoreScrollState(scrollState);
+      }
+
+      async function loadEntries({ silent = false } = {}) {
+        try {
+          const data = await api("/api/entries");
+          if (entriesAreEqual(data.entries)) return;
+          entries = data.entries;
+          renderEntries({ preserveScroll: true });
+        } catch (error) {
+          if (!silent) {
+            history.innerHTML = "";
+            const message = document.createElement("div");
+            message.className = "empty";
+            message.textContent = "暂时无法读取内容，请刷新页面重试。";
+            history.appendChild(message);
+            showToast(error.message, true);
+          }
+        }
+      }
+
+      async function saveEntry() {
+        const { content, imagePosition } = readDraft();
+        const bytes = byteLength(content);
+        const limit = pendingImage ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
+        if (!content.trim() && !pendingImage) {
+          showToast("请先输入文字或粘贴图片", true);
+          editor.focus();
+          return;
+        }
+        if (bytes > limit) {
+          showToast(
+            pendingImage
+              ? "图片附带文字不能超过 12 KB"
+              : "单条内容不能超过 200 KB",
+            true,
+          );
+          return;
+        }
+
+        saveButton.dataset.loading = "true";
+        saveButton.textContent = "正在保存…";
+        updateCounter();
+        try {
+          let data;
+          if (pendingImage) {
+            const response = await fetch("/api/images", {
+              method: "POST",
+              headers: {
+                "Content-Type": pendingImage.type,
+                "X-Filename": encodeURIComponent(
+                  normalizedFilename(pendingImage),
+                ),
+                "X-Content": encodeURIComponent(content),
+                "X-Image-Position": String(imagePosition ?? 0),
+              },
+              body: pendingImage,
+            });
+            data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(
+                data.error || `图片保存失败（${response.status}）`,
+              );
+            }
+          } else {
+            data = await api("/api/entries", {
+              method: "POST",
+              body: JSON.stringify({ content }),
+            });
+          }
+          entries = [data.entry, ...entries].slice(0, 100);
+          clearEditor();
+          updateCounter();
+          renderEntries();
+          showToast(
+            data.entry.type === "image"
+              ? "图片和文字已保存到中转站"
+              : "已保存，Windows 端可以复制了",
+          );
+        } catch (error) {
+          showToast(error.message, true);
+        } finally {
+          delete saveButton.dataset.loading;
+          saveButton.textContent = "保存到中转站";
+          updateCounter();
+        }
+      }
+
+      function normalizedFilename(file) {
+        if (file.name) return file.name;
+        const extension = {
+          "image/png": "png",
+          "image/jpeg": "jpg",
+          "image/webp": "webp",
+          "image/gif": "gif",
+        }[file.type] || "png";
+        return `clipboard-${Date.now()}.${extension}`;
+      }
+
+      function selectionIsInEditor(range) {
+        return Boolean(
+          range &&
+            (range.commonAncestorContainer === editor ||
+              editor.contains(range.commonAncestorContainer)),
+        );
+      }
+
+      function caretPositionForRange(range) {
+        if (!selectionIsInEditor(range)) return savedCaretPosition;
+        const beforeCaret = document.createRange();
+        beforeCaret.selectNodeContents(editor);
+        beforeCaret.setEnd(range.startContainer, range.startOffset);
+        const fragment = beforeCaret.cloneContents();
+        return Array.from(serializeDraft(fragment).content).length;
+      }
+
+      function rememberCaret() {
+        const selection = window.getSelection();
+        if (
+          selection?.rangeCount &&
+          selectionIsInEditor(selection.getRangeAt(0))
+        ) {
+          savedRange = selection.getRangeAt(0).cloneRange();
+          savedCaretPosition = caretPositionForRange(
+            selection.getRangeAt(0),
+          );
+        }
+      }
+
+      function editorEndRange() {
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+        return range;
+      }
+
+      function currentEditorRange() {
+        const selection = window.getSelection();
+        if (
+          selection?.rangeCount &&
+          selectionIsInEditor(selection.getRangeAt(0))
+        ) {
+          return selection.getRangeAt(0).cloneRange();
+        }
+        if (selectionIsInEditor(savedRange)) {
+          return savedRange.cloneRange();
+        }
+        return editorEndRange();
+      }
+
+      function selectRange(range) {
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        savedRange = range.cloneRange();
+        savedCaretPosition = caretPositionForRange(range);
+      }
+
+      function insertPlainText(text) {
+        const range = currentEditorRange();
+        range.deleteContents();
+        const fragment = document.createDocumentFragment();
+        const lines = text.replace(/\r\n?/g, "\n").split("\n");
+        let lastNode = null;
+        lines.forEach((line, index) => {
+          if (line) {
+            lastNode = document.createTextNode(line);
+            fragment.append(lastNode);
+          }
+          if (index < lines.length - 1) {
+            lastNode = document.createElement("br");
+            fragment.append(lastNode);
+          }
+        });
+        if (!lastNode) {
+          lastNode = document.createTextNode("");
+          fragment.append(lastNode);
+        }
+        range.insertNode(fragment);
+        range.setStartAfter(lastNode);
+        range.collapse(true);
+        selectRange(range);
+        updateCounter();
+      }
+
+      function releasePendingImage() {
+        pendingImage = null;
+        if (pendingImageUrl) URL.revokeObjectURL(pendingImageUrl);
+        pendingImageUrl = "";
+        pendingImageNode = null;
+        imageInput.value = "";
+        cameraInput.value = "";
+      }
+
+      function removePendingImage({ focus = true } = {}) {
+        if (pendingImageNode?.isConnected) {
+          const range = document.createRange();
+          range.setStartBefore(pendingImageNode);
+          range.collapse(true);
+          pendingImageNode.remove();
+          releasePendingImage();
+          if (focus) {
+            editor.focus();
+            selectRange(range);
+          }
+        } else {
+          releasePendingImage();
+        }
+        updateCounter();
+      }
+
+      function clearEditor() {
+        editor.replaceChildren();
+        releasePendingImage();
+        savedRange = null;
+        savedCaretPosition = 0;
+        filePickerPosition = null;
+      }
+
+      function appendPlainText(parent, text) {
+        const fragment = document.createDocumentFragment();
+        const lines = text.split("\n");
+        let firstNode = null;
+        let lastNode = null;
+        lines.forEach((line, index) => {
+          if (line) {
+            const textNode = document.createTextNode(line);
+            firstNode ||= textNode;
+            lastNode = textNode;
+            fragment.append(textNode);
+          }
+          if (index < lines.length - 1) {
+            const lineBreak = document.createElement("br");
+            firstNode ||= lineBreak;
+            lastNode = lineBreak;
+            fragment.append(lineBreak);
+          }
+        });
+        parent.append(fragment);
+        return { firstNode, lastNode };
+      }
+
+      function stageImage(file, preferredPosition = null) {
+        if (!file) return;
+        if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+          showToast("仅支持 PNG、JPEG、WebP 和 GIF 图片", true);
+          return;
+        }
+        if (!file.size) {
+          showToast("图片不能为空", true);
+          return;
+        }
+        if (file.size > MAX_IMAGE_BYTES) {
+          showToast("单张图片不能超过 10 MB", true);
+          return;
+        }
+
+        const currentRange = currentEditorRange();
+        const caretPosition =
+          Number.isInteger(preferredPosition)
+            ? preferredPosition
+            : caretPositionForRange(currentRange);
+        const draft = readDraft();
+        const characters = Array.from(draft.content);
+        const insertionPosition = Math.max(
+          0,
+          Math.min(caretPosition, characters.length),
+        );
+        const beforeImage = characters
+          .slice(0, insertionPosition)
+          .join("");
+        const afterImage = characters.slice(insertionPosition).join("");
+
+        if (pendingImageUrl) URL.revokeObjectURL(pendingImageUrl);
+        pendingImage = file;
+        pendingImageUrl = URL.createObjectURL(file);
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "inline-draft-image";
+        wrapper.contentEditable = "false";
+        wrapper.setAttribute("data-draft-image", "");
+
+        const image = document.createElement("img");
+        image.src = pendingImageUrl;
+        image.alt = "待保存图片";
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "inline-draft-remove";
+        remove.textContent = "×";
+        remove.setAttribute("aria-label", "移除待保存图片");
+        remove.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+        });
+        remove.addEventListener("click", () => removePendingImage());
+        wrapper.append(image, remove);
+
+        editor.replaceChildren();
+        appendPlainText(editor, beforeImage);
+        editor.append(wrapper);
+        const afterNodes = appendPlainText(editor, afterImage);
+        pendingImageNode = wrapper;
+
+        const insertionRange = document.createRange();
+        if (afterNodes.firstNode) {
+          insertionRange.setStartBefore(afterNodes.firstNode);
+        } else {
+          insertionRange.setStartAfter(wrapper);
+        }
+        insertionRange.collapse(true);
+        editor.focus();
+        selectRange(insertionRange);
+        savedCaretPosition = insertionPosition;
+        updateCounter();
+        showToast("图片已插入光标位置，点击保存后才会发送");
+      }
+
+      async function deleteEntry(id) {
+        try {
+          await api(`/api/entries/${id}`, { method: "DELETE" });
+          entries = entries.filter((entry) => entry.id !== id);
+          renderEntries();
+          showToast("记录已删除");
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      }
+
+      async function clearEntries() {
+        const confirmed = window.confirm(
+          "确定清空全部文字和图片吗？原始图片文件也会永久删除，此操作无法撤销。",
+        );
+        if (!confirmed) return;
+        try {
+          await api("/api/entries", { method: "DELETE" });
+          entries = [];
+          renderEntries();
+          showToast("历史内容已全部清空");
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      }
+
+      editor.addEventListener("input", () => {
+        rememberCaret();
+        updateCounter();
+      });
+      editor.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+          saveEntry();
+          return;
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          insertPlainText("\n");
+          return;
+        }
+        if (
+          (event.ctrlKey || event.metaKey) &&
+          ["b", "i", "u"].includes(event.key.toLowerCase())
+        ) {
+          event.preventDefault();
+        }
+      });
+      editor.addEventListener("beforeinput", (event) => {
+        if (event.inputType.startsWith("format")) {
+          event.preventDefault();
+        }
+      });
+      for (const eventName of ["keyup", "mouseup", "focus"]) {
+        editor.addEventListener(eventName, rememberCaret);
+      }
+      document.addEventListener("selectionchange", rememberCaret);
+      editor.addEventListener("blur", (event) => {
+        rememberCaret();
+        if (event.relatedTarget === chooseImage) {
+          filePickerPosition = savedCaretPosition;
+        }
+      });
+      saveButton.addEventListener("click", saveEntry);
+      clearButton.addEventListener("click", clearEntries);
+      chooseImage.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        filePickerPosition = savedCaretPosition;
+      });
+      chooseImage.addEventListener("click", () => imageInput.click());
+      takePhoto.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        filePickerPosition = savedCaretPosition;
+      });
+      takePhoto.addEventListener("click", () => cameraInput.click());
+      imageInput.addEventListener("change", () => {
+        stageImage(imageInput.files?.[0], filePickerPosition);
+        filePickerPosition = null;
+      });
+      cameraInput.addEventListener("change", () => {
+        stageImage(cameraInput.files?.[0], filePickerPosition);
+        filePickerPosition = null;
+      });
+      for (const eventName of ["dragenter", "dragover"]) {
+        editor.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          editor.classList.add("dragging");
+        });
+      }
+      for (const eventName of ["dragleave", "drop"]) {
+        editor.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          editor.classList.remove("dragging");
+        });
+      }
+      editor.addEventListener("drop", (event) => {
+        const image = Array.from(event.dataTransfer.files || []).find(
+          (file) => ALLOWED_IMAGE_TYPES.has(file.type),
+        );
+        if (image) stageImage(image);
+      });
+      editor.addEventListener("paste", (event) => {
+        const imageFiles = Array.from(
+          event.clipboardData?.files || [],
+        ).filter((file) => ALLOWED_IMAGE_TYPES.has(file.type));
+        event.preventDefault();
+        if (imageFiles.length) {
+          stageImage(imageFiles[0]);
+          return;
+        }
+        insertPlainText(event.clipboardData?.getData("text/plain") || "");
+      });
+
+      updateCounter();
+      loadEntries();
+      setInterval(() => loadEntries({ silent: true }), 30000);
+    </script>
+  </body>
+</html>

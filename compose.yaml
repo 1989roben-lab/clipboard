@@ -1,0 +1,34 @@
+name: lan-clipboard-8016
+
+services:
+  clipboard:
+    build:
+      context: .
+    container_name: lan-clipboard-8016
+    restart: unless-stopped
+    init: true
+    read_only: true
+    ports:
+      - "0.0.0.0:8016:8016"
+    volumes:
+      - clipboard-data:/data
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+volumes:
+  clipboard-data:
+    name: lan-clipboard-8016-data

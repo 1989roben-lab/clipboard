@@ -1,0 +1,14 @@
+# This workspace also contains private server setup material. Only the
+# standalone LAN clipboard application is allowed into this repository.
+*
+
+!.gitignore
+!.dockerignore
+!Dockerfile
+!README.md
+!compose.yaml
+!server.py
+!static/
+!static/index.html
+!tests/
+!tests/integration_test.py
