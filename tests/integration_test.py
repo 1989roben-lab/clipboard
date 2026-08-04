@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated integration tests for the LAN clipboard server."""
+"""Isolated integration tests for Memory."""
 
 from __future__ import annotations
 
@@ -175,6 +175,47 @@ class TestServer:
         )
         return json.loads(payload)
 
+    def upload_file(
+        self,
+        name: str,
+        mime_type: str,
+        data: bytes,
+        content: str = "",
+    ) -> dict[str, Any]:
+        initialized = self.json_call(
+            "/api/file-uploads",
+            "POST",
+            {
+                "filename": name,
+                "mime_type": mime_type,
+                "size": len(data),
+                "content": content,
+            },
+            201,
+        )
+        upload_id = initialized["upload_id"]
+        offset = 0
+        for end in range(3, len(data) + 3, 3):
+            chunk = data[offset : min(end, len(data))]
+            if not chunk:
+                break
+            payload, _ = self.call(
+                f"/api/file-uploads/{upload_id}",
+                "POST",
+                chunk,
+                {
+                    "Content-Type": "application/octet-stream",
+                    "X-Upload-Offset": str(offset),
+                },
+            )
+            offset = json.loads(payload)["received"]
+        return self.json_call(
+            f"/api/file-uploads/{upload_id}/complete",
+            "POST",
+            {},
+            201,
+        )
+
 
 def decoded_images() -> dict[str, tuple[str, bytes]]:
     return {
@@ -192,6 +233,82 @@ def main() -> None:
         images = decoded_images()
         server.start()
         try:
+            page, page_headers = server.call("/")
+            page_text = page.decode("utf-8")
+            assert "interactive-widget=resizes-content" in page_text
+            assert "user-scalable=no" not in page_text
+            assert 'rel="manifest"' in page_text
+            assert 'id="install-button"' in page_text
+            assert 'id="force-refresh"' in page_text
+            assert '<h1>Memory</h1>' in page_text
+            assert 'id="choose-image"' in page_text
+            assert "添加文件" in page_text
+            assert 'id="choose-attachment"' not in page_text
+            assert 'id="attachment-input"' not in page_text
+            assert "同一局域网" not in page_text
+            assert "Windows" not in page_text
+            assert 'id="install-modal"' in page_text
+            assert 'loadEntries({ force: true })' in page_text
+            assert 'register("/service-worker.js?v=14"' in page_text
+            assert 'apple-touch-icon.png?v=14' in page_text
+            assert 'updateViaCache: "none"' in page_text
+            assert 'window.location.reload()' in page_text
+            assert 'registration.update()' in page_text
+            assert page_headers.get_content_type() == "text/html"
+            assert page_headers["Cache-Control"] == "no-store, max-age=0"
+            versioned_page, versioned_page_headers = server.call(
+                "/?app=v14"
+            )
+            assert versioned_page == page
+            assert (
+                versioned_page_headers["Cache-Control"]
+                == "no-store, max-age=0"
+            )
+
+            manifest_body, manifest_headers = server.call(
+                "/manifest.webmanifest"
+            )
+            manifest = json.loads(manifest_body)
+            assert manifest["display"] == "standalone"
+            assert manifest["name"] == "Memory"
+            assert manifest["start_url"] == "/?app=v14"
+            assert all("?v=14" in icon["src"] for icon in manifest["icons"])
+            assert {icon["sizes"] for icon in manifest["icons"]} >= {
+                "192x192",
+                "512x512",
+            }
+            assert any(
+                "maskable" in icon.get("purpose", "")
+                for icon in manifest["icons"]
+            )
+            assert (
+                manifest_headers.get_content_type()
+                == "application/manifest+json"
+            )
+
+            worker, worker_headers = server.call("/service-worker.js")
+            worker_text = worker.decode("utf-8")
+            assert 'url.pathname.startsWith("/api/")' in worker_text
+            assert 'request.mode === "navigate"' in worker_text
+            assert '.catch(() => caches.match("/?app=v14"))' in worker_text
+            assert 'memory-shell-v14' in worker_text
+            assert 'ACTIVATE_UPDATE' in worker_text
+            assert worker_headers.get_content_type() == "application/javascript"
+            assert worker_headers["Cache-Control"] == "no-cache"
+            versioned_worker, _ = server.call("/service-worker.js?v=1")
+            assert versioned_worker == worker
+
+            for icon_path in (
+                "/icons/icon-192.png",
+                "/icons/icon-512.png",
+                "/icons/icon-maskable-512.png",
+                "/icons/apple-touch-icon.png",
+            ):
+                icon, icon_headers = server.call(icon_path)
+                assert icon.startswith(b"\x89PNG\r\n\x1a\n")
+                assert icon_headers.get_content_type() == "image/png"
+                assert "immutable" in icon_headers["Cache-Control"]
+
             created: list[dict[str, Any]] = []
             for name, (mime_type, raw) in images.items():
                 caption = "前😀后" if name == "test.png" else ""
@@ -217,9 +334,102 @@ def main() -> None:
                 assert download_headers[
                     "Content-Disposition"
                 ].startswith("attachment;")
+            attachment_data = b"arbitrary-file-content"
+            attachment = server.upload_file(
+                "资料.tar",
+                "application/x-tar",
+                attachment_data,
+                content="测试附件",
+            )["entry"]
+            assert attachment["type"] == "file"
+            assert attachment["filename"] == "资料.tar"
+            assert attachment["size_bytes"] == len(attachment_data)
+            downloaded, headers = server.call(
+                f"/api/files/{attachment['id']}/download"
+            )
+            assert downloaded == attachment_data
+            assert headers.get_content_type() == "application/x-tar"
+            assert headers["Content-Disposition"].startswith("attachment;")
             assert len(
                 server.json_call("/api/entries")["entries"]
-            ) == 4
+            ) == 5
+
+            editable = server.json_call(
+                "/api/entries",
+                "POST",
+                {"content": "修改前"},
+                201,
+            )["entry"]
+            updated = server.json_call(
+                f"/api/entries/{editable['id']}",
+                "PATCH",
+                {"content": "修改后\n第二行"},
+            )["entry"]
+            assert updated["content"] == "修改后\n第二行"
+            assert updated["created_at"] == editable["created_at"]
+            assert server.json_call(
+                "/api/entries"
+            )["entries"][0]["content"] == "修改后\n第二行"
+            empty_update = server.json_call(
+                f"/api/entries/{editable['id']}",
+                "PATCH",
+                {"content": "   "},
+                400,
+            )
+            assert "请输入" in empty_update["error"]
+            image_update = server.json_call(
+                f"/api/entries/{created[0]['id']}",
+                "PATCH",
+                {"content": "图片说明已修改"},
+            )["entry"]
+            assert image_update["content"] == "图片说明已修改"
+            assert image_update["image_position"] == 2
+            file_update = server.json_call(
+                f"/api/entries/{attachment['id']}",
+                "PATCH",
+                {"content": "附件说明已修改"},
+            )["entry"]
+            assert file_update["content"] == "附件说明已修改"
+            cleared_image_note = server.json_call(
+                f"/api/entries/{created[0]['id']}",
+                "PATCH",
+                {"content": ""},
+            )["entry"]
+            assert cleared_image_note["content"] == ""
+            assert cleared_image_note["image_position"] == 0
+            server.json_call(
+                f"/api/entries/{editable['id']}",
+                "DELETE",
+            )
+
+            oversized = server.json_call(
+                "/api/file-uploads",
+                "POST",
+                {
+                    "filename": "too-large.bin",
+                    "mime_type": "application/octet-stream",
+                    "size": 100 * 1024 * 1024 + 1,
+                    "content": "",
+                },
+                413,
+            )
+            assert "100 MB" in oversized["error"]
+
+            maximum = server.json_call(
+                "/api/file-uploads",
+                "POST",
+                {
+                    "filename": "maximum.bin",
+                    "mime_type": "application/octet-stream",
+                    "size": 100 * 1024 * 1024,
+                    "content": "",
+                },
+                201,
+            )
+            server.json_call(
+                f"/api/file-uploads/{maximum['upload_id']}",
+                "DELETE",
+            )
 
             server.upload(
                 "fake.png",
@@ -269,7 +479,29 @@ def main() -> None:
                 f"/api/images/{first_id}",
                 expected=404,
             )
-            server.json_call("/api/entries", "DELETE")
+            unfinished = server.json_call(
+                "/api/file-uploads",
+                "POST",
+                {
+                    "filename": "unfinished.bin",
+                    "mime_type": "application/octet-stream",
+                    "size": 5,
+                    "content": "",
+                },
+                201,
+            )
+            server.call(
+                f"/api/file-uploads/{unfinished['upload_id']}",
+                "POST",
+                b"x",
+                {
+                    "Content-Type": "application/octet-stream",
+                    "X-Upload-Offset": "0",
+                },
+            )
+            cleared = server.json_call("/api/entries", "DELETE")
+            assert cleared["deleted"] == 4
+            assert cleared["cancelled_uploads"] == 1
             assert not list((root / "uploads").iterdir())
 
             old_image = server.upload(
@@ -324,9 +556,12 @@ def main() -> None:
                 json.dumps(
                     {
                         "formats": 4,
+                        "attachments": "100 MB chunked",
+                        "clear_all": "records and pending uploads",
                         "validation": "ok",
                         "combined_retention": 100,
                         "restart_persistence": "ok",
+                        "pwa": "installable shell-only cache",
                     },
                     ensure_ascii=False,
                 )

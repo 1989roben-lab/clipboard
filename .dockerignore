@@ -5,4 +5,6 @@ __pycache__
 *.sqlite
 *.sqlite3
 *.db
+._*
+*.bak*
 README.md

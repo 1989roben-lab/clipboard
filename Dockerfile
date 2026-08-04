@@ -13,7 +13,7 @@ RUN addgroup -S app \
 
 WORKDIR /app
 COPY --chown=app:app server.py /app/server.py
-COPY --chown=app:app static/index.html /app/static/index.html
+COPY --chown=app:app static/ /app/static/
 
 USER app
 EXPOSE 8016

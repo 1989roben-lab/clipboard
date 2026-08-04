@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A tiny LAN clipboard server using only the Python standard library."""
+"""Memory: a private place for thoughts, images, and files."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import json
 import os
 import re
 import sqlite3
+import threading
+import time
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,16 +22,59 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8016"))
 DB_PATH = Path(os.environ.get("DB_PATH", "/data/clipboard.db"))
 UPLOAD_DIR = DB_PATH.parent / "uploads"
-STATIC_PATH = Path(__file__).resolve().parent / "static" / "index.html"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_PATH = STATIC_DIR / "index.html"
+STATIC_ROUTES = {
+    "/manifest.webmanifest": (
+        STATIC_DIR / "manifest.webmanifest",
+        "application/manifest+json; charset=utf-8",
+        "no-cache",
+    ),
+    "/service-worker.js": (
+        STATIC_DIR / "service-worker.js",
+        "application/javascript; charset=utf-8",
+        "no-cache",
+    ),
+    "/icons/icon-192.png": (
+        STATIC_DIR / "icons" / "icon-192.png",
+        "image/png",
+        "public, max-age=31536000, immutable",
+    ),
+    "/icons/icon-512.png": (
+        STATIC_DIR / "icons" / "icon-512.png",
+        "image/png",
+        "public, max-age=31536000, immutable",
+    ),
+    "/icons/icon-maskable-512.png": (
+        STATIC_DIR / "icons" / "icon-maskable-512.png",
+        "image/png",
+        "public, max-age=31536000, immutable",
+    ),
+    "/icons/apple-touch-icon.png": (
+        STATIC_DIR / "icons" / "apple-touch-icon.png",
+        "image/png",
+        "public, max-age=31536000, immutable",
+    ),
+}
 MAX_ENTRIES = 100
 MAX_CONTENT_BYTES = 200 * 1024
 MAX_IMAGE_CONTENT_BYTES = 12 * 1024
 MAX_JSON_REQUEST_BYTES = 256 * 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_FILE_BYTES = 100 * 1024 * 1024
+MAX_FILE_CHUNK_BYTES = 8 * 1024 * 1024
+FILE_UPLOAD_TTL_SECONDS = 24 * 60 * 60
 ENTRY_PATH = re.compile(r"^/api/entries/([1-9][0-9]*)$")
 IMAGE_PATH = re.compile(
     r"^/api/images/([1-9][0-9]*)(/download)?$"
 )
+FILE_PATH = re.compile(
+    r"^/api/files/([1-9][0-9]*)(/download)?$"
+)
+FILE_UPLOAD_PATH = re.compile(
+    r"^/api/file-uploads/([0-9a-f]{32})(/complete)?$"
+)
+UPLOAD_LOCK = threading.Lock()
 IMAGE_FORMATS = {
     "image/png": (".png", {".png"}),
     "image/jpeg": (".jpg", {".jpg", ".jpeg"}),
@@ -107,6 +152,20 @@ def initialize_database() -> None:
             ON entries(created_at DESC, id DESC)
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS file_uploads (
+                upload_id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                stored_name TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                total_size INTEGER NOT NULL,
+                received_size INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL
+            )
+            """
+        )
     reconcile_uploads()
 
 
@@ -137,7 +196,7 @@ def reconcile_uploads() -> None:
             """
             SELECT id, stored_name
             FROM entries
-            WHERE entry_type = 'image'
+            WHERE entry_type IN ('image', 'file')
             """
         ).fetchall()
         referenced: set[str] = set()
@@ -153,6 +212,7 @@ def reconcile_uploads() -> None:
                 f"DELETE FROM entries WHERE id IN ({placeholders})",
                 missing_ids,
             )
+        connection.execute("DELETE FROM file_uploads")
 
     for path in UPLOAD_DIR.iterdir():
         if (
@@ -172,6 +232,24 @@ def reconcile_uploads() -> None:
                 path.unlink()
             except OSError:
                 pass
+
+
+def expire_file_uploads() -> None:
+    cutoff = time.time() - FILE_UPLOAD_TTL_SECONDS
+    with UPLOAD_LOCK, connect_db() as connection:
+        rows = connection.execute(
+            """
+            SELECT stored_name
+            FROM file_uploads
+            WHERE created_at < ?
+            """,
+            (cutoff,),
+        ).fetchall()
+        connection.execute(
+            "DELETE FROM file_uploads WHERE created_at < ?",
+            (cutoff,),
+        )
+    unlink_uploads([row["stored_name"] for row in rows])
 
 
 def prune_entries(connection: sqlite3.Connection) -> list[str]:
@@ -216,7 +294,7 @@ def detect_image_type(data: bytes) -> str | None:
     return None
 
 
-def clean_filename(raw_filename: str, suffix: str) -> str:
+def clean_filename(raw_filename: str, default_name: str) -> str:
     filename = Path(unquote(raw_filename)).name
     filename = "".join(
         character
@@ -224,8 +302,21 @@ def clean_filename(raw_filename: str, suffix: str) -> str:
         if character >= " " and character not in "\r\n"
     ).strip()
     if not filename:
-        filename = f"image{suffix}"
+        filename = default_name
     return filename[:180]
+
+
+def clean_mime_type(raw_mime_type: object) -> str:
+    if not isinstance(raw_mime_type, str):
+        return "application/octet-stream"
+    mime_type = raw_mime_type.split(";", 1)[0].strip().lower()
+    if (
+        not mime_type
+        or len(mime_type) > 120
+        or any(character < " " for character in mime_type)
+    ):
+        return "application/octet-stream"
+    return mime_type
 
 
 def public_entry(row: sqlite3.Row) -> dict[str, Any]:
@@ -242,10 +333,10 @@ def public_entry(row: sqlite3.Row) -> dict[str, Any]:
 
 
 class ClipboardHandler(BaseHTTPRequestHandler):
-    server_version = "LanClipboard/2.0"
+    server_version = "Memory/1.0"
 
     def do_GET(self) -> None:
-        if self.path == "/":
+        if self.path.partition("?")[0] == "/":
             try:
                 body = STATIC_PATH.read_bytes()
             except OSError:
@@ -254,7 +345,31 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     {"error": "页面文件不可用"},
                 )
                 return
-            self.send_bytes(HTTPStatus.OK, body, "text/html; charset=utf-8")
+            self.send_bytes(
+                HTTPStatus.OK,
+                body,
+                "text/html; charset=utf-8",
+                cache_control="no-store, max-age=0",
+            )
+            return
+
+        static_route = STATIC_ROUTES.get(self.path.partition("?")[0])
+        if static_route is not None:
+            path, content_type, cache_control = static_route
+            try:
+                body = path.read_bytes()
+            except OSError:
+                self.send_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {"error": "静态资源不可用"},
+                )
+                return
+            self.send_bytes(
+                HTTPStatus.OK,
+                body,
+                content_type,
+                cache_control=cache_control,
+            )
             return
 
         if self.path == "/health":
@@ -292,9 +407,19 @@ class ClipboardHandler(BaseHTTPRequestHandler):
 
         image_match = IMAGE_PATH.fullmatch(self.path)
         if image_match:
-            self.send_image(
+            self.send_upload(
                 int(image_match.group(1)),
+                entry_type="image",
                 download=bool(image_match.group(2)),
+            )
+            return
+
+        file_match = FILE_PATH.fullmatch(self.path)
+        if file_match:
+            self.send_upload(
+                int(file_match.group(1)),
+                entry_type="file",
+                download=True,
             )
             return
 
@@ -307,7 +432,102 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         if self.path == "/api/images":
             self.create_image_entry()
             return
+        if self.path == "/api/file-uploads":
+            self.create_file_upload()
+            return
+        upload_match = FILE_UPLOAD_PATH.fullmatch(self.path)
+        if upload_match:
+            upload_id = upload_match.group(1)
+            if upload_match.group(2):
+                self.complete_file_upload(upload_id)
+            else:
+                self.append_file_chunk(upload_id)
+            return
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "未找到该接口"})
+
+    def do_PATCH(self) -> None:
+        match = ENTRY_PATH.fullmatch(self.path)
+        if match:
+            self.update_text_entry(int(match.group(1)))
+            return
+        self.send_json(HTTPStatus.NOT_FOUND, {"error": "未找到该接口"})
+
+    def update_text_entry(self, entry_id: int) -> None:
+        payload = self.read_json_body()
+        if payload is None:
+            return
+
+        content = payload.get("content")
+        if not isinstance(content, str):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "内容必须是文本"},
+            )
+            return
+        with connect_db() as connection:
+            existing = connection.execute(
+                """
+                SELECT entry_type, image_position
+                FROM entries
+                WHERE id = ?
+                """,
+                (entry_id,),
+            ).fetchone()
+            if existing is None:
+                self.send_json(
+                    HTTPStatus.NOT_FOUND,
+                    {"error": "这条记录不存在"},
+                )
+                return
+            entry_type = existing["entry_type"]
+            if entry_type == "text" and not content.strip():
+                self.send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "请输入要保存的内容"},
+                )
+                return
+            content_limit = (
+                MAX_CONTENT_BYTES
+                if entry_type == "text"
+                else MAX_IMAGE_CONTENT_BYTES
+            )
+            if len(content.encode("utf-8")) > content_limit:
+                self.send_json(
+                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                    {
+                        "error": (
+                            "单条内容不能超过 200 KB"
+                            if entry_type == "text"
+                            else "图片或附件说明不能超过 12 KB"
+                        )
+                    },
+                )
+                return
+            image_position = existing["image_position"]
+            if entry_type == "image":
+                image_position = max(
+                    0,
+                    min(image_position or 0, len(content)),
+                )
+            connection.execute(
+                """
+                UPDATE entries
+                SET content = ?, image_position = ?
+                WHERE id = ?
+                """,
+                (content, image_position, entry_id),
+            )
+            row = connection.execute(
+                """
+                SELECT
+                    id, entry_type, content, filename,
+                    mime_type, size_bytes, image_position, created_at
+                FROM entries
+                WHERE id = ?
+                """,
+                (entry_id,),
+            ).fetchone()
+        self.send_json(HTTPStatus.OK, {"entry": public_entry(row)})
 
     def create_text_entry(self) -> None:
         payload = self.read_json_body()
@@ -402,7 +622,7 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         suffix, allowed_suffixes = IMAGE_FORMATS[detected_type]
         filename = clean_filename(
             self.headers.get("X-Filename", ""),
-            suffix,
+            f"image{suffix}",
         )
         filename_suffix = Path(filename).suffix.lower()
         if filename_suffix not in allowed_suffixes:
@@ -500,23 +720,344 @@ class ClipboardHandler(BaseHTTPRequestHandler):
             {"entry": public_entry(row)},
         )
 
-    def do_DELETE(self) -> None:
-        if self.path == "/api/entries":
+    def create_file_upload(self) -> None:
+        payload = self.read_json_body()
+        if payload is None:
+            return
+
+        filename_value = payload.get("filename")
+        total_size = payload.get("size")
+        content = payload.get("content", "")
+        if not isinstance(filename_value, str):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "附件名称无效"},
+            )
+            return
+        if (
+            not isinstance(total_size, int)
+            or isinstance(total_size, bool)
+            or total_size < 0
+        ):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "附件大小无效"},
+            )
+            return
+        if total_size > MAX_FILE_BYTES:
+            self.send_json(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                {"error": "单个附件不能超过 100 MB"},
+            )
+            return
+        if not isinstance(content, str):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "附件说明必须是文本"},
+            )
+            return
+        if len(content.encode("utf-8")) > MAX_IMAGE_CONTENT_BYTES:
+            self.send_json(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                {"error": "附件说明不能超过 12 KB"},
+            )
+            return
+
+        expire_file_uploads()
+        upload_id = uuid.uuid4().hex
+        stored_name = f".upload-{upload_id}"
+        upload_path = UPLOAD_DIR / stored_name
+        filename = clean_filename(filename_value, "附件")
+        mime_type = clean_mime_type(payload.get("mime_type"))
+        try:
+            upload_path.touch(exist_ok=False)
             with connect_db() as connection:
-                rows = connection.execute(
+                connection.execute(
+                    """
+                    INSERT INTO file_uploads (
+                        upload_id, filename, stored_name, mime_type,
+                        content, total_size, received_size, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                    """,
+                    (
+                        upload_id,
+                        filename,
+                        stored_name,
+                        mime_type,
+                        content,
+                        total_size,
+                        time.time(),
+                    ),
+                )
+        except (OSError, sqlite3.Error):
+            upload_path.unlink(missing_ok=True)
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"error": "无法开始附件上传，请重试"},
+            )
+            return
+
+        self.send_json(
+            HTTPStatus.CREATED,
+            {
+                "upload_id": upload_id,
+                "received": 0,
+                "total": total_size,
+                "chunk_size": MAX_FILE_CHUNK_BYTES,
+            },
+        )
+
+    def append_file_chunk(self, upload_id: str) -> None:
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            offset = int(self.headers.get("X-Upload-Offset", "-1"))
+        except ValueError:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "附件分片参数无效"},
+            )
+            return
+        if content_length <= 0:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "附件分片不能为空"},
+            )
+            return
+        if content_length > MAX_FILE_CHUNK_BYTES:
+            self.send_json(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                {"error": "附件分片不能超过 8 MB"},
+            )
+            return
+
+        data = self.rfile.read(content_length)
+        if len(data) != content_length:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "附件分片上传不完整"},
+            )
+            return
+
+        try:
+            with UPLOAD_LOCK, connect_db() as connection:
+                row = connection.execute(
+                    """
+                    SELECT stored_name, total_size, received_size
+                    FROM file_uploads
+                    WHERE upload_id = ?
+                    """,
+                    (upload_id,),
+                ).fetchone()
+                if row is None:
+                    self.send_json(
+                        HTTPStatus.NOT_FOUND,
+                        {"error": "附件上传任务不存在或已过期"},
+                    )
+                    return
+                if offset != row["received_size"]:
+                    self.send_json(
+                        HTTPStatus.CONFLICT,
+                        {
+                            "error": "附件分片位置不一致",
+                            "received": row["received_size"],
+                        },
+                    )
+                    return
+                received_size = offset + content_length
+                if received_size > row["total_size"]:
+                    self.send_json(
+                        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                        {"error": "附件内容超过声明大小"},
+                    )
+                    return
+                upload_path = safe_upload_path(row["stored_name"])
+                if (
+                    upload_path is None
+                    or not upload_path.is_file()
+                    or upload_path.stat().st_size != offset
+                ):
+                    self.send_json(
+                        HTTPStatus.CONFLICT,
+                        {"error": "附件临时文件状态不一致，请重新选择"},
+                    )
+                    return
+                with upload_path.open("ab") as upload_file:
+                    upload_file.write(data)
+                connection.execute(
+                    """
+                    UPDATE file_uploads
+                    SET received_size = ?
+                    WHERE upload_id = ?
+                    """,
+                    (received_size, upload_id),
+                )
+        except (OSError, sqlite3.Error):
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"error": "附件分片保存失败，请重试"},
+            )
+            return
+
+        self.send_json(
+            HTTPStatus.OK,
+            {"received": received_size},
+        )
+
+    def complete_file_upload(self, upload_id: str) -> None:
+        final_path: Path | None = None
+        upload_path: Path | None = None
+        try:
+            with UPLOAD_LOCK, connect_db() as connection:
+                row = connection.execute(
+                    """
+                    SELECT
+                        filename, stored_name, mime_type, content,
+                        total_size, received_size
+                    FROM file_uploads
+                    WHERE upload_id = ?
+                    """,
+                    (upload_id,),
+                ).fetchone()
+                if row is None:
+                    self.send_json(
+                        HTTPStatus.NOT_FOUND,
+                        {"error": "附件上传任务不存在或已过期"},
+                    )
+                    return
+                if row["received_size"] != row["total_size"]:
+                    self.send_json(
+                        HTTPStatus.CONFLICT,
+                        {
+                            "error": "附件尚未上传完整",
+                            "received": row["received_size"],
+                            "total": row["total_size"],
+                        },
+                    )
+                    return
+                upload_path = safe_upload_path(row["stored_name"])
+                if (
+                    upload_path is None
+                    or not upload_path.is_file()
+                    or upload_path.stat().st_size != row["total_size"]
+                ):
+                    self.send_json(
+                        HTTPStatus.CONFLICT,
+                        {"error": "附件临时文件状态不一致，请重新选择"},
+                    )
+                    return
+
+                stored_name = uuid.uuid4().hex
+                final_path = UPLOAD_DIR / stored_name
+                os.replace(upload_path, final_path)
+                cursor = connection.execute(
+                    """
+                    INSERT INTO entries (
+                        content, entry_type, filename, stored_name,
+                        mime_type, size_bytes
+                    )
+                    VALUES (?, 'file', ?, ?, ?, ?)
+                    """,
+                    (
+                        row["content"],
+                        row["filename"],
+                        stored_name,
+                        row["mime_type"],
+                        row["total_size"],
+                    ),
+                )
+                entry_id = cursor.lastrowid
+                connection.execute(
+                    "DELETE FROM file_uploads WHERE upload_id = ?",
+                    (upload_id,),
+                )
+                expired_uploads = prune_entries(connection)
+                entry = connection.execute(
+                    """
+                    SELECT
+                        id, entry_type, content, filename,
+                        mime_type, size_bytes, image_position, created_at
+                    FROM entries
+                    WHERE id = ?
+                    """,
+                    (entry_id,),
+                ).fetchone()
+        except (OSError, sqlite3.Error):
+            if (
+                final_path is not None
+                and final_path.exists()
+                and upload_path is not None
+            ):
+                try:
+                    os.replace(final_path, upload_path)
+                except OSError:
+                    pass
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"error": "附件保存失败，请重试"},
+            )
+            return
+
+        unlink_uploads(expired_uploads)
+        self.send_json(
+            HTTPStatus.CREATED,
+            {"entry": public_entry(entry)},
+        )
+
+    def cancel_file_upload(self, upload_id: str) -> None:
+        with UPLOAD_LOCK, connect_db() as connection:
+            row = connection.execute(
+                """
+                SELECT stored_name
+                FROM file_uploads
+                WHERE upload_id = ?
+                """,
+                (upload_id,),
+            ).fetchone()
+            if row is not None:
+                connection.execute(
+                    "DELETE FROM file_uploads WHERE upload_id = ?",
+                    (upload_id,),
+                )
+        if row is not None:
+            unlink_uploads([row["stored_name"]])
+        self.send_json(HTTPStatus.OK, {"cancelled": row is not None})
+
+    def do_DELETE(self) -> None:
+        upload_match = FILE_UPLOAD_PATH.fullmatch(self.path)
+        if upload_match and not upload_match.group(2):
+            self.cancel_file_upload(upload_match.group(1))
+            return
+
+        if self.path == "/api/entries":
+            with UPLOAD_LOCK, connect_db() as connection:
+                entry_rows = connection.execute(
                     """
                     SELECT stored_name
                     FROM entries
                     WHERE stored_name IS NOT NULL
                     """
                 ).fetchall()
+                upload_rows = connection.execute(
+                    """
+                    SELECT stored_name
+                    FROM file_uploads
+                    """
+                ).fetchall()
                 cursor = connection.execute("DELETE FROM entries")
+                cancelled_uploads = connection.execute(
+                    "DELETE FROM file_uploads"
+                ).rowcount
             unlink_uploads(
-                [row["stored_name"] for row in rows]
+                [row["stored_name"] for row in entry_rows]
+                + [row["stored_name"] for row in upload_rows]
             )
             self.send_json(
                 HTTPStatus.OK,
-                {"deleted": cursor.rowcount},
+                {
+                    "deleted": cursor.rowcount,
+                    "cancelled_uploads": cancelled_uploads,
+                },
             )
             return
 
@@ -549,20 +1090,25 @@ class ClipboardHandler(BaseHTTPRequestHandler):
 
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "未找到该接口"})
 
-    def send_image(self, entry_id: int, download: bool) -> None:
+    def send_upload(
+        self,
+        entry_id: int,
+        entry_type: str,
+        download: bool,
+    ) -> None:
         with connect_db() as connection:
             row = connection.execute(
                 """
                 SELECT filename, stored_name, mime_type, size_bytes
                 FROM entries
-                WHERE id = ? AND entry_type = 'image'
+                WHERE id = ? AND entry_type = ?
                 """,
-                (entry_id,),
+                (entry_id, entry_type),
             ).fetchone()
         if row is None:
             self.send_json(
                 HTTPStatus.NOT_FOUND,
-                {"error": "图片不存在"},
+                {"error": "文件不存在"},
             )
             return
 
@@ -570,7 +1116,7 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         if path is None or not path.is_file():
             self.send_json(
                 HTTPStatus.NOT_FOUND,
-                {"error": "图片文件不存在"},
+                {"error": "文件不存在"},
             )
             return
 
@@ -582,7 +1128,10 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         try:
             file_size = path.stat().st_size
             self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", row["mime_type"])
+            self.send_header(
+                "Content-Type",
+                row["mime_type"] or "application/octet-stream",
+            )
             self.send_header("Content-Length", str(file_size))
             self.send_header(
                 "Content-Disposition",
@@ -592,8 +1141,8 @@ class ClipboardHandler(BaseHTTPRequestHandler):
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
-            with path.open("rb") as image_file:
-                while chunk := image_file.read(64 * 1024):
+            with path.open("rb") as upload_file:
+                while chunk := upload_file.read(1024 * 1024):
                     self.wfile.write(chunk)
         except OSError:
             return
@@ -651,11 +1200,13 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         status: HTTPStatus,
         body: bytes,
         content_type: str,
+        *,
+        cache_control: str = "no-store",
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
@@ -679,7 +1230,7 @@ class ClipboardHandler(BaseHTTPRequestHandler):
 def main() -> None:
     initialize_database()
     server = ThreadingHTTPServer((HOST, PORT), ClipboardHandler)
-    print(f"LAN clipboard listening on http://{HOST}:{PORT}", flush=True)
+    print(f"Memory listening on http://{HOST}:{PORT}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

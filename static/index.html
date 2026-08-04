@@ -2,39 +2,65 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#152f2a" />
-    <title>局域网内容中转站</title>
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="default"
+    />
+    <meta name="apple-mobile-web-app-title" content="Memory" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=14" />
+    <title>Memory — 记录每一个此刻</title>
     <style>
       :root {
-        --ink: #18302c;
-        --muted: #697873;
-        --paper: #f7f4ed;
-        --card: rgba(255, 255, 255, 0.84);
-        --line: #d9ded8;
-        --green: #1e5b4f;
-        --green-dark: #15463d;
-        --danger: #a43e35;
-        --shadow: 0 16px 40px rgba(36, 54, 49, 0.09);
+        --ink: #1e1e1e;
+        --muted: #5b5b5b;
+        --paper: #f5f5f5;
+        --card: #ffffff;
+        --line: #1e1e1e;
+        --green: #0d99ff;
+        --green-dark: #0877c9;
+        --accent-pink: #ff6b8a;
+        --accent-yellow: #ffc700;
+        --accent-green: #14ae5c;
+        --danger: #d92d20;
+        --shadow: 6px 6px 0 #1e1e1e;
       }
 
       * {
         box-sizing: border-box;
       }
 
+      html {
+        min-width: 0;
+        min-height: 100%;
+        overflow-x: hidden;
+        background: var(--paper);
+        overscroll-behavior-y: contain;
+      }
+
       body {
         margin: 0;
-        min-width: 320px;
+        min-width: 0;
         min-height: 100vh;
+        min-height: 100dvh;
+        overflow-x: hidden;
         color: var(--ink);
-        background:
-          radial-gradient(circle at 8% 3%, #e0eadf 0, transparent 32rem),
-          radial-gradient(circle at 94% 18%, #efe0c8 0, transparent 28rem),
-          var(--paper);
+        background: var(--paper);
         font-family:
           Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+          "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei",
+          sans-serif;
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+        -webkit-font-smoothing: antialiased;
       }
 
       button,
@@ -43,13 +69,17 @@
       }
 
       button {
+        appearance: none;
+        -webkit-appearance: none;
         touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
       }
 
       .shell {
-        width: min(960px, calc(100% - 32px));
+        width: min(1040px, calc(100% - 40px));
         margin: 0 auto;
-        padding: 56px 0 72px;
+        padding: 48px 0 80px;
       }
 
       header {
@@ -62,28 +92,28 @@
 
       .eyebrow {
         margin: 0 0 8px;
-        color: var(--green);
+        color: var(--ink);
         font-size: 13px;
         font-weight: 800;
-        letter-spacing: 0.14em;
+        letter-spacing: 0.09em;
         text-transform: uppercase;
       }
 
       h1 {
         margin: 0;
-        font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
-        font-size: clamp(34px, 6vw, 58px);
-        font-weight: 600;
-        letter-spacing: -0.035em;
-        line-height: 1.02;
+        max-width: 720px;
+        font-size: clamp(48px, 8vw, 88px);
+        font-weight: 800;
+        letter-spacing: -0.065em;
+        line-height: 0.92;
       }
 
       .subtitle {
-        max-width: 440px;
-        margin: 13px 0 0;
+        max-width: 620px;
+        margin: 20px 0 0;
         color: var(--muted);
-        font-size: 15px;
-        line-height: 1.7;
+        font-size: 17px;
+        line-height: 1.65;
       }
 
       .status-pill {
@@ -92,28 +122,83 @@
         align-items: center;
         gap: 8px;
         padding: 9px 13px;
-        border: 1px solid var(--line);
+        border: 1.5px solid var(--line);
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.62);
+        background: #fff;
         color: var(--muted);
         font-size: 13px;
+      }
+
+      .header-actions {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 9px;
+        flex-wrap: wrap;
       }
 
       .status-dot {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #32a06f;
-        box-shadow: 0 0 0 4px rgba(50, 160, 111, 0.13);
+        background: var(--accent-green);
+        box-shadow: none;
+      }
+
+      .status-pill.offline {
+        border-color: var(--line);
+        background: #fff0f0;
+        color: var(--danger);
+      }
+
+      .status-pill.offline .status-dot {
+        background: #b7792f;
+        box-shadow: 0 0 0 4px rgba(183, 121, 47, 0.14);
+      }
+
+      .install-button {
+        min-height: 38px;
+        padding: 8px 13px;
+        border: 1.5px solid var(--line);
+        border-radius: 999px;
+        background: var(--accent-yellow);
+        color: var(--ink);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 760;
+      }
+
+      .install-button[hidden] {
+        display: none;
+      }
+
+      .install-button:hover {
+        background: #ffd94a;
+      }
+
+      .refresh-button {
+        min-height: 38px;
+        padding: 8px 13px;
+        border: 1.5px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--ink);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 760;
+      }
+
+      .refresh-button:hover:not(:disabled) {
+        background: #ededed;
       }
 
       .composer {
         padding: 22px;
-        border: 1px solid rgba(202, 211, 204, 0.9);
-        border-radius: 20px;
+        border: 1.5px solid var(--line);
+        border-radius: 18px;
         background: var(--card);
         box-shadow: var(--shadow);
-        backdrop-filter: blur(14px);
       }
 
       label {
@@ -129,18 +214,18 @@
         min-height: 250px;
         max-height: 620px;
         padding: 16px;
-        border: 1px solid #cbd3cd;
-        border-radius: 13px;
+        border: 1.5px solid var(--line);
+        border-radius: 10px;
         outline: none;
         background: #fff;
-        color: #1d2926;
-        font-family:
-          "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-        font-size: 14px;
-        line-height: 1.6;
+        color: var(--ink);
+        font-family: inherit;
+        font-size: 16px;
+        line-height: 1.65;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         tab-size: 4;
+        scroll-margin-block: 16px;
         transition:
           border-color 150ms ease,
           box-shadow 150ms ease;
@@ -148,12 +233,12 @@
 
       .rich-editor:focus,
       .rich-editor.dragging {
-        border-color: #5e8d80;
-        box-shadow: 0 0 0 4px rgba(54, 118, 100, 0.12);
+        border-color: var(--green);
+        box-shadow: 0 0 0 4px rgba(13, 153, 255, 0.18);
       }
 
       .rich-editor:empty::before {
-        color: #98a29e;
+        color: #7a7a7a;
         content: attr(data-placeholder);
         pointer-events: none;
       }
@@ -211,33 +296,154 @@
 
       .composer-tools {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: 10px;
         margin-bottom: 5px;
       }
 
       .choose-image {
-        padding: 7px 10px;
-        border: 1px solid #cbd8d1;
+        min-height: 42px;
+        padding: 9px 13px;
+        border: 1.5px solid var(--line);
         border-radius: 9px;
-        background: #f3f7f4;
-        color: var(--green);
+        background: #fff;
+        color: var(--ink);
         cursor: pointer;
-        font-size: 12px;
-        font-weight: 720;
+        font-size: 13px;
+        font-weight: 700;
       }
 
       .choose-image:hover {
-        background: #e8f1ec;
+        background: #ededed;
       }
 
-      .camera-button {
+      #image-input {
         display: none;
       }
 
-      #image-input,
-      #camera-input {
+      .pending-attachment {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-top: 12px;
+        padding: 12px 14px;
+        border: 1.5px solid var(--line);
+        border-radius: 12px;
+        background: #fff7d6;
+      }
+
+      .pending-attachment[hidden] {
         display: none;
+      }
+
+      .pending-attachment-info {
+        min-width: 0;
+      }
+
+      .pending-attachment-name {
+        overflow: hidden;
+        margin: 0 0 3px;
+        font-size: 13px;
+        font-weight: 720;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .pending-attachment-size {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .camera-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        display: grid;
+        padding: 18px;
+        place-items: center;
+        background: rgba(9, 20, 17, 0.9);
+      }
+
+      .camera-modal[hidden] {
+        display: none;
+      }
+
+      .install-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: grid;
+        padding: 18px;
+        place-items: center;
+        background: rgba(0, 0, 0, 0.62);
+      }
+
+      .install-modal[hidden] {
+        display: none;
+      }
+
+      .install-panel {
+        width: min(100%, 440px);
+        padding: 24px;
+        border: 1.5px solid var(--line);
+        border-radius: 16px;
+        background: #fff;
+        box-shadow: 8px 8px 0 var(--ink);
+      }
+
+      .install-panel h2 {
+        margin-bottom: 12px;
+      }
+
+      .install-help {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.75;
+        white-space: pre-line;
+      }
+
+      .install-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 20px;
+      }
+
+      .camera-panel {
+        width: min(100%, 520px);
+        overflow: hidden;
+        border-radius: 18px;
+        background: #1e1e1e;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+      }
+
+      .camera-preview {
+        display: block;
+        width: 100%;
+        max-height: 70vh;
+        background: #000;
+        object-fit: contain;
+      }
+
+      .camera-status {
+        margin: 0;
+        padding: 12px 16px 0;
+        color: #fff;
+        font-size: 13px;
+        text-align: center;
+      }
+
+      .camera-actions {
+        display: flex;
+        gap: 10px;
+        padding: 14px 16px 16px;
+      }
+
+      .camera-actions button {
+        flex: 1;
+        min-height: 46px;
       }
 
       .hint,
@@ -256,7 +462,7 @@
       .danger,
       .icon-button {
         border: 0;
-        border-radius: 10px;
+        border-radius: 9px;
         cursor: pointer;
         font-weight: 720;
         transition:
@@ -270,7 +476,7 @@
       }
 
       button:focus-visible {
-        outline: 3px solid rgba(45, 119, 98, 0.3);
+        outline: 3px solid rgba(13, 153, 255, 0.35);
         outline-offset: 2px;
       }
 
@@ -282,8 +488,10 @@
       .primary {
         min-width: 128px;
         padding: 12px 18px;
+        border: 1.5px solid var(--line);
         background: var(--green);
         color: #fff;
+        box-shadow: 3px 3px 0 var(--ink);
       }
 
       .primary:hover:not(:disabled) {
@@ -306,9 +514,9 @@
 
       h2 {
         margin: 0;
-        font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
-        font-size: 25px;
-        font-weight: 600;
+        font-size: 30px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
       }
 
       .count {
@@ -334,10 +542,10 @@
 
       .entry {
         overflow: hidden;
-        border: 1px solid var(--line);
-        border-radius: 16px;
-        background: rgba(255, 255, 255, 0.76);
-        box-shadow: 0 8px 24px rgba(44, 60, 55, 0.045);
+        border: 1.5px solid var(--line);
+        border-radius: 14px;
+        background: #fff;
+        box-shadow: 4px 4px 0 rgba(30, 30, 30, 0.14);
       }
 
       .entry-meta {
@@ -346,8 +554,8 @@
         justify-content: space-between;
         gap: 12px;
         padding: 11px 14px;
-        border-bottom: 1px solid #e5e8e4;
-        background: rgba(238, 242, 237, 0.6);
+        border-bottom: 1.5px solid var(--line);
+        background: #f5f5f5;
       }
 
       .meta-left {
@@ -360,8 +568,9 @@
       .kind-badge {
         padding: 3px 7px;
         border-radius: 999px;
-        background: #dceae3;
-        color: var(--green);
+        border: 1px solid var(--line);
+        background: #d6f5e2;
+        color: var(--ink);
         font-size: 11px;
         font-weight: 760;
       }
@@ -383,8 +592,8 @@
         border: 0;
         border-radius: 10px;
         background: #fff;
-        color: var(--green);
-        box-shadow: inset 0 0 0 1px #d2dad4;
+        color: var(--ink);
+        box-shadow: inset 0 0 0 1.5px var(--line);
         cursor: pointer;
         font-size: 12px;
         font-weight: 720;
@@ -394,7 +603,57 @@
       .secondary:hover,
       .icon-button:hover,
       .secondary-link:hover {
-        background: #edf4f0;
+        background: #ededed;
+      }
+
+      .entry-editor {
+        padding: 16px;
+      }
+
+      .entry-editor textarea {
+        display: block;
+        width: 100%;
+        min-height: 180px;
+        max-height: 480px;
+        resize: vertical;
+        padding: 14px;
+        border: 1px solid #b9c9c1;
+        border-radius: 11px;
+        outline: none;
+        background: #fff;
+        color: #24322f;
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      .entry-editor textarea:focus {
+        border-color: var(--green);
+        box-shadow: 0 0 0 4px rgba(13, 153, 255, 0.18);
+      }
+
+      .entry-editor-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 10px;
+      }
+
+      .entry-editor-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .entry-editor-count {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .entry-editor-count.over {
+        color: var(--danger);
+        font-weight: 700;
       }
 
       .icon-button {
@@ -484,6 +743,36 @@
         font-size: 12px;
       }
 
+      .attachment-content {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+      }
+
+      .attachment-card {
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        min-width: 0;
+        padding: 14px;
+        border: 1px solid #dce4de;
+        border-radius: 12px;
+        background: #f6f8f6;
+      }
+
+      .attachment-icon {
+        display: grid;
+        flex: 0 0 42px;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border-radius: 11px;
+        background: #e3eee8;
+        color: var(--green);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
       .empty,
       .loading {
         padding: 46px 20px;
@@ -508,7 +797,8 @@
         max-width: min(360px, calc(100vw - 44px));
         padding: 12px 16px;
         border-radius: 11px;
-        background: #173d34;
+        border: 1.5px solid #fff;
+        background: #1e1e1e;
         color: #fff;
         box-shadow: 0 12px 30px rgba(19, 47, 41, 0.25);
         font-size: 14px;
@@ -529,39 +819,122 @@
         background: #84352e;
       }
 
-      @media (hover: none) and (pointer: coarse) {
-        .camera-button {
-          display: inline-block;
-        }
-      }
-
       @media (max-width: 640px) {
+        body {
+          width: 100%;
+          overscroll-behavior-x: none;
+        }
+
         .shell {
-          width: min(100% - 22px, 960px);
-          padding: 30px 0 48px;
+          width: 100%;
+          max-width: 480px;
+          padding:
+            max(20px, env(safe-area-inset-top))
+            max(16px, env(safe-area-inset-right))
+            calc(88px + env(safe-area-inset-bottom))
+            max(16px, env(safe-area-inset-left));
         }
 
         header {
           align-items: flex-start;
           flex-direction: column;
+          gap: 12px;
+          margin-bottom: 16px;
+        }
+
+        .eyebrow {
+          margin-bottom: 4px;
+          font-size: 10px;
+        }
+
+        h1 {
+          font-size: clamp(46px, 14vw, 64px);
+          line-height: 0.92;
+        }
+
+        .subtitle {
+          max-width: none;
+          margin-top: 7px;
+          font-size: 15px;
+          line-height: 1.6;
+        }
+
+        .header-actions {
+          width: 100%;
+          justify-content: flex-start;
+        }
+
+        .status-pill,
+        .install-button,
+        .refresh-button {
+          min-height: 44px;
         }
 
         .composer {
           padding: 15px;
-          border-radius: 16px;
+          border-radius: 14px;
+          box-shadow: 4px 4px 0 var(--ink);
+        }
+
+        label {
+          margin-bottom: 8px;
         }
 
         .rich-editor {
-          min-height: 270px;
+          min-height: clamp(148px, 22dvh, 184px);
+          max-height: 44dvh;
+          padding: 12px;
+          font-size: 16px;
         }
 
         .composer-footer {
           align-items: stretch;
           flex-direction: column;
+          gap: 8px;
+          margin-top: 10px;
+        }
+
+        .composer-footer > div {
+          width: 100%;
+        }
+
+        .composer-tools {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .choose-image {
+          width: 100%;
+          min-height: 44px;
+          padding: 10px 9px;
+          font-size: 13px;
+        }
+
+        .hint {
+          grid-column: 1 / -1;
+          line-height: 1.5;
         }
 
         .primary {
           width: 100%;
+          min-height: 50px;
+          font-size: 15px;
+        }
+
+        .pending-attachment .icon-button,
+        .danger,
+        .secondary,
+        .icon-button,
+        .secondary-link {
+          min-height: 44px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .history-heading {
+          margin-top: 26px;
         }
 
         .entry-meta {
@@ -574,9 +947,130 @@
           flex-wrap: wrap;
         }
 
+        .entry-editor {
+          padding: 12px;
+        }
+
+        .entry-editor textarea {
+          min-height: 160px;
+          padding: 12px;
+          font-size: 16px;
+        }
+
+        .entry-editor-footer {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .entry-editor-actions button {
+          flex: 1;
+          min-height: 44px;
+        }
+
         .image-details {
           align-items: flex-start;
           flex-direction: column;
+        }
+
+        .camera-actions .secondary,
+        .camera-actions .primary {
+          min-height: 48px;
+        }
+
+        .toast {
+          right: 12px;
+          bottom: calc(82px + env(safe-area-inset-bottom));
+          max-width: calc(100vw - 24px);
+        }
+      }
+
+      @media (max-width: 360px) {
+        .composer-tools {
+          grid-template-columns: 1fr;
+        }
+
+        #quick-camera,
+        .hint {
+          grid-column: 1;
+        }
+
+        .header-actions {
+          gap: 7px;
+        }
+      }
+
+      @media (display-mode: standalone) {
+        body {
+          min-height: 100dvh;
+        }
+
+        .install-button {
+          display: none;
+        }
+
+        .shell {
+          padding-bottom: calc(32px + env(safe-area-inset-bottom));
+        }
+
+        .toast {
+          bottom: calc(18px + env(safe-area-inset-bottom));
+        }
+      }
+
+      @supports (-webkit-touch-callout: none) {
+        html,
+        body {
+          min-height: -webkit-fill-available;
+        }
+
+        .rich-editor,
+        .entry-editor textarea {
+          font-size: 16px;
+        }
+
+        .install-modal,
+        .camera-modal {
+          height: 100dvh;
+          -webkit-overflow-scrolling: touch;
+        }
+      }
+
+      @media (max-width: 640px) and (display-mode: standalone) {
+        html,
+        body {
+          width: 100%;
+          max-width: 100%;
+          min-height: 100%;
+        }
+
+        .shell {
+          width: 100%;
+          max-width: none;
+          min-height: 100vh;
+          min-height: 100dvh;
+          padding-top: max(20px, env(safe-area-inset-top));
+          padding-right: max(12px, env(safe-area-inset-right));
+          padding-bottom: max(
+            32px,
+            calc(18px + env(safe-area-inset-bottom))
+          );
+          padding-left: max(12px, env(safe-area-inset-left));
+        }
+
+        .header-actions {
+          display: grid;
+          grid-template-columns: max-content max-content;
+          justify-content: start;
+        }
+
+        .install-modal,
+        .camera-modal {
+          min-height: 100vh;
+          min-height: 100dvh;
+          padding-top: max(18px, env(safe-area-inset-top));
+          padding-right: max(18px, env(safe-area-inset-right));
+          padding-bottom: max(18px, env(safe-area-inset-bottom));
+          padding-left: max(18px, env(safe-area-inset-left));
         }
       }
 
@@ -588,75 +1082,428 @@
           transition-duration: 0.01ms !important;
         }
       }
+
+      /* iOS Liquid Glass visual layer */
+      :root {
+        --ink: #111318;
+        --muted: #63666d;
+        --paper: #edf2f7;
+        --card: rgba(255, 255, 255, 0.58);
+        --line: rgba(255, 255, 255, 0.72);
+        --green: #007aff;
+        --green-dark: #0062cc;
+        --danger: #ff3b30;
+        --shadow:
+          0 24px 60px rgba(50, 74, 103, 0.13),
+          inset 0 1px 0 rgba(255, 255, 255, 0.9);
+      }
+
+      html {
+        background: #edf2f7;
+      }
+
+      body {
+        position: relative;
+        isolation: isolate;
+        background:
+          radial-gradient(circle at 8% 8%, rgba(119, 184, 255, 0.42), transparent 31rem),
+          radial-gradient(circle at 92% 16%, rgba(218, 178, 255, 0.36), transparent 30rem),
+          linear-gradient(155deg, #f8fbff 0%, #edf2f7 48%, #f4f0fa 100%);
+        background-attachment: fixed;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+          "Helvetica Neue", "PingFang SC", "Noto Sans SC", sans-serif;
+      }
+
+      body::before {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        background:
+          radial-gradient(circle at 20% 72%, rgba(96, 218, 255, 0.18), transparent 26rem),
+          radial-gradient(circle at 82% 82%, rgba(255, 146, 191, 0.17), transparent 27rem);
+        content: "";
+        pointer-events: none;
+      }
+
+      .shell {
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        padding: 36px clamp(16px, 2.2vw, 32px) 82px;
+      }
+
+      header {
+        align-items: flex-start;
+        margin-bottom: 24px;
+      }
+
+      .eyebrow {
+        margin-bottom: 7px;
+        color: var(--green);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+
+      h1 {
+        font-size: clamp(48px, 7vw, 72px);
+        font-weight: 720;
+        letter-spacing: -0.055em;
+        line-height: 0.98;
+      }
+
+      .subtitle {
+        max-width: 600px;
+        margin-top: 14px;
+        color: rgba(40, 42, 48, 0.68);
+        font-size: 16px;
+        line-height: 1.6;
+      }
+
+      .header-actions {
+        gap: 8px;
+      }
+
+      .status-pill,
+      .install-button,
+      .refresh-button {
+        min-height: 42px;
+        border: 1px solid rgba(255, 255, 255, 0.76);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.48);
+        color: rgba(26, 28, 33, 0.78);
+        box-shadow:
+          0 8px 22px rgba(55, 76, 103, 0.1),
+          inset 0 1px 0 rgba(255, 255, 255, 0.92);
+        -webkit-backdrop-filter: blur(22px) saturate(180%);
+        backdrop-filter: blur(22px) saturate(180%);
+      }
+
+      .install-button {
+        background: rgba(0, 122, 255, 0.86);
+        color: #fff;
+      }
+
+      .install-button:hover,
+      .refresh-button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.68);
+      }
+
+      .install-button:hover {
+        background: rgba(0, 104, 218, 0.9);
+      }
+
+      .status-dot {
+        background: #30d158;
+        box-shadow: 0 0 0 4px rgba(48, 209, 88, 0.13);
+      }
+
+      .composer {
+        padding: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.78);
+        border-radius: 30px;
+        background: rgba(255, 255, 255, 0.5);
+        box-shadow: var(--shadow);
+        -webkit-backdrop-filter: blur(34px) saturate(180%);
+        backdrop-filter: blur(34px) saturate(180%);
+      }
+
+      label {
+        margin: 0 2px 11px;
+        font-size: 15px;
+        font-weight: 650;
+      }
+
+      .rich-editor {
+        min-height: 238px;
+        padding: 17px;
+        border: 1px solid rgba(255, 255, 255, 0.84);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.62);
+        color: var(--ink);
+        box-shadow:
+          inset 0 1px 1px rgba(255, 255, 255, 0.95),
+          0 6px 18px rgba(54, 74, 99, 0.06);
+      }
+
+      .rich-editor:focus,
+      .rich-editor.dragging {
+        border-color: rgba(0, 122, 255, 0.5);
+        box-shadow:
+          0 0 0 4px rgba(0, 122, 255, 0.12),
+          inset 0 1px 1px rgba(255, 255, 255, 0.95);
+      }
+
+      .choose-image,
+      .secondary,
+      .icon-button,
+      .secondary-link {
+        border: 1px solid rgba(255, 255, 255, 0.78);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.56);
+        color: #1267bd;
+        box-shadow:
+          0 5px 14px rgba(54, 73, 97, 0.08),
+          inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        -webkit-backdrop-filter: blur(18px) saturate(170%);
+        backdrop-filter: blur(18px) saturate(170%);
+      }
+
+      .choose-image:hover,
+      .secondary:hover,
+      .icon-button:hover,
+      .secondary-link:hover {
+        background: rgba(255, 255, 255, 0.78);
+      }
+
+      .primary {
+        border: 0;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #168cff 0%, #007aff 100%);
+        color: #fff;
+        box-shadow:
+          0 9px 22px rgba(0, 122, 255, 0.26),
+          inset 0 1px 0 rgba(255, 255, 255, 0.35);
+      }
+
+      .primary:hover:not(:disabled) {
+        background: linear-gradient(180deg, #087ff2 0%, #0069dc 100%);
+      }
+
+      .primary:disabled {
+        background: rgba(120, 181, 241, 0.72);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+      }
+
+      button:active {
+        transform: scale(0.98);
+      }
+
+      button:focus-visible {
+        outline: 3px solid rgba(0, 122, 255, 0.24);
+      }
+
+      .pending-attachment {
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.54);
+      }
+
+      .history-heading {
+        margin: 38px 2px 14px;
+      }
+
+      h2 {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.035em;
+      }
+
+      .entry {
+        border: 1px solid rgba(255, 255, 255, 0.78);
+        border-radius: 26px;
+        background: rgba(255, 255, 255, 0.52);
+        box-shadow:
+          0 18px 42px rgba(52, 72, 96, 0.1),
+          inset 0 1px 0 rgba(255, 255, 255, 0.95);
+        -webkit-backdrop-filter: blur(28px) saturate(175%);
+        backdrop-filter: blur(28px) saturate(175%);
+      }
+
+      .entry-meta {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.68);
+        background: rgba(255, 255, 255, 0.3);
+      }
+
+      .kind-badge {
+        border: 0;
+        background: rgba(0, 122, 255, 0.1);
+        color: #0068d8;
+      }
+
+      .empty,
+      .loading {
+        border: 1px solid rgba(255, 255, 255, 0.75);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.32);
+        -webkit-backdrop-filter: blur(20px);
+        backdrop-filter: blur(20px);
+      }
+
+      .install-modal {
+        background: rgba(225, 231, 239, 0.54);
+        -webkit-backdrop-filter: blur(28px) saturate(160%);
+        backdrop-filter: blur(28px) saturate(160%);
+      }
+
+      .install-panel {
+        border: 1px solid rgba(255, 255, 255, 0.84);
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: 0 28px 70px rgba(36, 54, 76, 0.18);
+        -webkit-backdrop-filter: blur(38px) saturate(180%);
+        backdrop-filter: blur(38px) saturate(180%);
+      }
+
+      .toast {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        background: rgba(24, 25, 29, 0.86);
+        -webkit-backdrop-filter: blur(22px) saturate(160%);
+        backdrop-filter: blur(22px) saturate(160%);
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          width: 100%;
+          max-width: none;
+          margin: 0;
+          padding-top: max(18px, env(safe-area-inset-top));
+          padding-right: max(8px, env(safe-area-inset-right));
+          padding-left: max(8px, env(safe-area-inset-left));
+        }
+
+        h1 {
+          font-size: clamp(42px, 12vw, 54px);
+          line-height: 0.98;
+        }
+
+        .subtitle {
+          margin-top: 10px;
+        }
+
+        .composer {
+          padding: 14px;
+          border-radius: 26px;
+          box-shadow: 0 18px 42px rgba(52, 72, 96, 0.13);
+        }
+
+        .rich-editor {
+          border-radius: 20px;
+        }
+
+        .choose-image {
+          border-radius: 999px;
+        }
+
+        .primary {
+          min-height: 52px;
+        }
+
+        .entry {
+          border-radius: 24px;
+        }
+      }
     </style>
   </head>
   <body>
     <main class="shell">
       <header>
         <div>
-          <p class="eyebrow">LAN Clipboard · 8016</p>
-          <h1>局域网内容中转站</h1>
+          <p class="eyebrow">Capture what matters</p>
+          <h1>Memory</h1>
           <p class="subtitle">
-            在这里保存整段命令或图片，再从同一局域网里的 Windows
-            电脑复制或下载。记录会保留在这台 Mac 上。
+            随时随地，存下你的记忆、想法、图片与文件。
+            每一个值得留下的此刻，都安全保存在这里。
           </p>
         </div>
-        <div class="status-pill" aria-label="服务状态正常">
-          <span class="status-dot"></span>
-          局域网在线
+        <div class="header-actions">
+          <button
+            class="install-button"
+            id="install-button"
+            type="button"
+            hidden
+          >
+            安装 Memory
+          </button>
+          <div
+            class="status-pill"
+            id="service-status"
+            aria-label="服务器在线"
+            aria-live="polite"
+          >
+            <span class="status-dot"></span>
+            <span id="status-text">服务器在线</span>
+          </div>
+          <button
+            class="refresh-button"
+            id="force-refresh"
+            type="button"
+          >
+            强制刷新
+          </button>
         </div>
       </header>
 
       <section class="composer" aria-labelledby="composer-label">
-        <label id="composer-label" for="content">准备要传送的内容</label>
+        <label id="composer-label" for="content">记录此刻</label>
         <div
           class="rich-editor"
           id="content"
           contenteditable="true"
           role="textbox"
           aria-multiline="true"
-          aria-label="输入文字或粘贴图片"
-          data-placeholder="输入文字，或直接在这里粘贴图片……"
-          spellcheck="false"
+          aria-label="记录想法、粘贴图片或添加附件"
+          data-placeholder="写下此刻的想法……"
+          autocapitalize="sentences"
+          spellcheck="true"
         ></div>
+        <div
+          class="pending-attachment"
+          id="pending-attachment"
+          hidden
+        >
+          <div class="pending-attachment-info">
+            <p
+              class="pending-attachment-name"
+              id="pending-attachment-name"
+            ></p>
+            <span
+              class="pending-attachment-size"
+              id="pending-attachment-size"
+            ></span>
+          </div>
+          <button
+            class="icon-button"
+            id="remove-attachment"
+            type="button"
+          >
+            移除
+          </button>
+        </div>
         <div class="composer-footer">
           <div>
             <div class="composer-tools">
               <button class="choose-image" id="choose-image" type="button">
-                选择图片
+                添加文件
               </button>
               <button
-                class="choose-image camera-button"
-                id="take-photo"
+                class="choose-image"
+                id="quick-camera"
                 type="button"
+                aria-haspopup="dialog"
               >
-                拍摄照片
+                快速拍照上传
               </button>
-              <span class="hint">也可粘贴或拖入图片</span>
+              <span class="hint">支持粘贴图片、拖入文件，单个附件最大 100 MB</span>
             </div>
             <div class="counter" id="counter">0 B / 200 KB</div>
           </div>
           <button class="primary" id="save-button" type="button">
-            保存到中转站
+            存入 Memory
           </button>
         </div>
         <input
           id="image-input"
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
-        />
-        <input
-          id="camera-input"
-          type="file"
-          accept="image/*"
-          capture="environment"
         />
       </section>
 
       <section aria-labelledby="history-title">
         <div class="history-heading">
           <div class="history-title">
-            <h2 id="history-title">历史内容</h2>
+            <h2 id="history-title">我的记忆</h2>
             <span class="count" id="entry-count"></span>
           </div>
           <button class="danger" id="clear-button" type="button" disabled>
@@ -664,17 +1511,73 @@
           </button>
         </div>
         <div class="history" id="history" aria-live="polite">
-          <div class="loading">正在读取内容……</div>
+          <div class="loading">正在读取记忆……</div>
         </div>
       </section>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div
+      class="install-modal"
+      id="install-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="install-help-title"
+      hidden
+    >
+      <div class="install-panel">
+        <h2 id="install-help-title">安装 Memory</h2>
+        <p class="install-help" id="install-help"></p>
+        <div class="install-actions">
+          <button class="primary" id="close-install-help" type="button">
+            我知道了
+          </button>
+        </div>
+      </div>
+    </div>
+    <div
+      class="camera-modal"
+      id="camera-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="快速拍照"
+      hidden
+    >
+      <div class="camera-panel">
+        <video
+          class="camera-preview"
+          id="camera-preview"
+          autoplay
+          muted
+          playsinline
+        ></video>
+        <p class="camera-status" id="camera-status">
+          照片会自动缩小并立即上传
+        </p>
+        <div class="camera-actions">
+          <button class="secondary" id="cancel-camera" type="button">
+            取消
+          </button>
+          <button class="primary" id="capture-camera" type="button">
+            拍照并上传
+          </button>
+        </div>
+      </div>
+    </div>
 
     <script>
       const MAX_BYTES = 200 * 1024;
       const MAX_IMAGE_TEXT_BYTES = 12 * 1024;
       const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+      const MAX_FILE_BYTES = 100 * 1024 * 1024;
+      const FILE_CHUNK_BYTES = 8 * 1024 * 1024;
+      const MAX_IMAGE_EDGE = 1920;
+      const IMAGE_COMPRESSION_THRESHOLD_BYTES = 2 * 1024 * 1024;
+      const IMAGE_COMPRESSION_TARGET_BYTES = 1 * 1024 * 1024;
+      const IMAGE_UPLOAD_TIMEOUT_MS = 90 * 1000;
+      const IMAGE_COMPRESSION_QUALITIES = [0.82, 0.68, 0.54];
+      const QUICK_PHOTO_MAX_EDGE = 1280;
+      const QUICK_PHOTO_QUALITY = 0.72;
       const ALLOWED_IMAGE_TYPES = new Set([
         "image/png",
         "image/jpeg",
@@ -685,22 +1588,51 @@
       const saveButton = document.querySelector("#save-button");
       const clearButton = document.querySelector("#clear-button");
       const chooseImage = document.querySelector("#choose-image");
-      const takePhoto = document.querySelector("#take-photo");
+      const quickCamera = document.querySelector("#quick-camera");
       const imageInput = document.querySelector("#image-input");
-      const cameraInput = document.querySelector("#camera-input");
+      const pendingAttachmentPanel = document.querySelector(
+        "#pending-attachment",
+      );
+      const pendingAttachmentName = document.querySelector(
+        "#pending-attachment-name",
+      );
+      const pendingAttachmentSize = document.querySelector(
+        "#pending-attachment-size",
+      );
+      const removeAttachment = document.querySelector("#remove-attachment");
+      const cameraModal = document.querySelector("#camera-modal");
+      const cameraPreview = document.querySelector("#camera-preview");
+      const cameraStatus = document.querySelector("#camera-status");
+      const cancelCamera = document.querySelector("#cancel-camera");
+      const captureCamera = document.querySelector("#capture-camera");
       const counter = document.querySelector("#counter");
       const history = document.querySelector("#history");
       const entryCount = document.querySelector("#entry-count");
       const toast = document.querySelector("#toast");
+      const installButton = document.querySelector("#install-button");
+      const forceRefreshButton = document.querySelector("#force-refresh");
+      const serviceStatus = document.querySelector("#service-status");
+      const statusText = document.querySelector("#status-text");
+      const installModal = document.querySelector("#install-modal");
+      const installHelp = document.querySelector("#install-help");
+      const closeInstallHelp = document.querySelector(
+        "#close-install-help",
+      );
       const encoder = new TextEncoder();
       let toastTimer;
+      let deferredInstallPrompt = null;
       let entries = [];
       let pendingImage = null;
+      let pendingAttachment = null;
       let pendingImageUrl = "";
       let pendingImageNode = null;
       let savedRange = null;
       let savedCaretPosition = 0;
       let filePickerPosition = null;
+      let imagePreparing = false;
+      let cameraStream = null;
+      let cameraCapturePosition = 0;
+      let reloadingForServiceWorker = false;
 
       function byteLength(text) {
         return encoder.encode(text).length;
@@ -711,7 +1643,10 @@
         if (bytes < 1024 * 1024) {
           return `${(bytes / 1024).toFixed(1)} KB`;
         }
-        return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+        if (bytes < 1024 * 1024 * 1024) {
+          return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+        }
+        return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
       }
 
       function serializeDraft(root) {
@@ -761,13 +1696,20 @@
       function updateCounter() {
         const { content } = readDraft();
         const bytes = byteLength(content);
-        const limit = pendingImage ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
+        const pendingUpload = pendingImage || pendingAttachment;
+        const limit = pendingUpload ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
+        const uploadLabel = pendingAttachment
+          ? "12 KB（附件说明）"
+          : pendingImage
+            ? "12 KB（图片说明）"
+            : "200 KB";
         counter.textContent =
-          `${formatBytes(bytes)} / ${pendingImage ? "12 KB（图片说明）" : "200 KB"}`;
+          `${formatBytes(bytes)} / ${uploadLabel}`;
         counter.classList.toggle("over", bytes > limit);
         saveButton.disabled =
           saveButton.dataset.loading === "true" ||
-          (!content.trim() && !pendingImage) ||
+          imagePreparing ||
+          (!content.trim() && !pendingUpload) ||
           bytes > limit;
       }
 
@@ -779,14 +1721,97 @@
         toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
       }
 
+      function setServerStatus(online) {
+        serviceStatus.classList.toggle("offline", !online);
+        statusText.textContent = online ? "服务器在线" : "服务器未连接";
+        serviceStatus.setAttribute("aria-label", statusText.textContent);
+      }
+
+      function isStandalone() {
+        return (
+          window.matchMedia("(display-mode: standalone)").matches ||
+          window.navigator.standalone === true
+        );
+      }
+
+      function mobilePlatform() {
+        const userAgent = navigator.userAgent || "";
+        if (
+          /iPhone|iPad|iPod/i.test(userAgent) ||
+          (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+        ) {
+          return "ios";
+        }
+        if (/Android/i.test(userAgent)) return "android";
+        return "desktop";
+      }
+
+      function updateInstallButton() {
+        const platform = mobilePlatform();
+        document.documentElement.dataset.platform = platform;
+        document.documentElement.dataset.standalone = String(isStandalone());
+        installButton.textContent = "安装 Memory";
+        installButton.hidden = isStandalone();
+      }
+
+      function showInstallHelp() {
+        const platform = mobilePlatform();
+        if (platform === "ios") {
+          installHelp.textContent =
+            "请使用 Safari 打开 Memory，点击底部的“分享”按钮，再选择“添加到主屏幕”。\n\n安装后 Memory 会以独立窗口运行；如果没有看到该选项，请在分享菜单底部选择“编辑操作”并添加它。";
+        } else if (platform === "android") {
+          installHelp.textContent = window.isSecureContext
+            ? "请使用 Chrome 打开 Memory，点击右上角菜单，然后选择“安装应用”或“添加到主屏幕”。"
+            : "请使用 Chrome 打开 Memory，点击右上角菜单，再选择“添加到主屏幕”来创建手机快捷方式。\n\n当前页面使用 HTTP；如需安装完整 PWA，需要先配置 HTTPS。";
+        } else {
+          installHelp.textContent =
+            "当前浏览器没有提供自动安装提示。请打开浏览器菜单，选择“安装应用”或“创建快捷方式”。";
+        }
+        installModal.hidden = false;
+        closeInstallHelp.focus();
+      }
+
+      async function updateApplicationShell() {
+        if (!("serviceWorker" in navigator)) return;
+        try {
+          const registration =
+            await navigator.serviceWorker.getRegistration();
+          if (registration?.waiting) {
+            registration.waiting.postMessage({ type: "ACTIVATE_UPDATE" });
+          }
+          await registration?.update();
+        } catch {
+          // The current page remains usable if an update check is unavailable.
+        }
+      }
+
+      async function checkServerStatus() {
+        try {
+          const response = await fetch("/health", { cache: "no-store" });
+          setServerStatus(response.ok);
+          return response.ok;
+        } catch {
+          setServerStatus(false);
+          return false;
+        }
+      }
+
       async function api(path, options = {}) {
-        const response = await fetch(path, {
-          ...options,
-          headers: {
-            "Content-Type": "application/json",
-            ...(options.headers || {}),
-          },
-        });
+        let response;
+        try {
+          response = await fetch(path, {
+            ...options,
+            cache: options.cache || "no-store",
+            headers: {
+              "Content-Type": "application/json",
+              ...(options.headers || {}),
+            },
+          });
+          setServerStatus(true);
+        } catch (error) {
+          setServerStatus(false);
+          throw error;
+        }
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(data.error || `请求失败（${response.status}）`);
@@ -874,6 +1899,102 @@
         });
       }
 
+      function startEntryEdit(entry, contentNode, editButton) {
+        const isTextEntry = entry.type === "text";
+        const limit = isTextEntry ? MAX_BYTES : MAX_IMAGE_TEXT_BYTES;
+        const limitLabel = isTextEntry ? "200 KB" : "12 KB";
+        const editLabel =
+          entry.type === "image"
+            ? "编辑图片说明"
+            : entry.type === "file"
+              ? "编辑附件说明"
+              : "编辑文字内容";
+        const panel = document.createElement("div");
+        panel.className = "entry-editor";
+
+        const textarea = document.createElement("textarea");
+        textarea.value = entry.content || "";
+        textarea.setAttribute("aria-label", editLabel);
+        textarea.placeholder = isTextEntry ? "输入文字内容" : "添加说明（可留空）";
+        textarea.spellcheck = false;
+
+        const footer = document.createElement("div");
+        footer.className = "entry-editor-footer";
+        const count = document.createElement("span");
+        count.className = "entry-editor-count";
+        const editorActions = document.createElement("div");
+        editorActions.className = "entry-editor-actions";
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "secondary";
+        cancel.textContent = "取消";
+        const submit = document.createElement("button");
+        submit.type = "button";
+        submit.className = "primary";
+        submit.textContent = "保存修改";
+
+        function updateEditState() {
+          const bytes = byteLength(textarea.value);
+          count.textContent = `${formatBytes(bytes)} / ${limitLabel}`;
+          count.classList.toggle("over", bytes > limit);
+          submit.disabled =
+            (isTextEntry && !textarea.value.trim()) || bytes > limit;
+        }
+
+        function cancelEdit() {
+          panel.replaceWith(contentNode);
+          editButton.disabled = false;
+        }
+
+        async function submitEdit() {
+          submit.disabled = true;
+          submit.textContent = "保存中…";
+          try {
+            const data = await api(`/api/entries/${entry.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ content: textarea.value }),
+            });
+            entries = entries.map((item) =>
+              item.id === entry.id ? data.entry : item,
+            );
+            renderEntries({ preserveScroll: true });
+            showToast("修改已保存");
+          } catch (error) {
+            showToast(error.message, true);
+            submit.textContent = "保存修改";
+            updateEditState();
+          }
+        }
+
+        textarea.addEventListener("input", updateEditState);
+        textarea.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancelEdit();
+          } else if (
+            (event.ctrlKey || event.metaKey) &&
+            event.key === "Enter" &&
+            !submit.disabled
+          ) {
+            event.preventDefault();
+            submitEdit();
+          }
+        });
+        cancel.addEventListener("click", cancelEdit);
+        submit.addEventListener("click", submitEdit);
+        editorActions.append(cancel, submit);
+        footer.append(count, editorActions);
+        panel.append(textarea, footer);
+        contentNode.replaceWith(panel);
+        editButton.disabled = true;
+        updateEditState();
+        textarea.focus();
+        textarea.setSelectionRange(
+          textarea.value.length,
+          textarea.value.length,
+        );
+      }
+
       function renderEntries({ preserveScroll = false } = {}) {
         const scrollState = preserveScroll ? captureScrollState() : null;
         history.replaceChildren();
@@ -911,7 +2032,9 @@
               ? entry.content
                 ? "图文"
                 : "图片"
-              : "文字";
+              : entry.type === "file"
+                ? "附件"
+                : "文字";
 
           const time = document.createElement("time");
           time.dateTime = entry.created_at;
@@ -932,6 +2055,11 @@
           remove.addEventListener("click", () => deleteEntry(entry.id));
 
           if (entry.type === "image") {
+            const edit = document.createElement("button");
+            edit.type = "button";
+            edit.className = "secondary";
+            edit.textContent = "编辑";
+            actions.append(edit);
             if (entry.content) {
               const copy = document.createElement("button");
               copy.type = "button";
@@ -1025,8 +2153,73 @@
             imageContent.append(previewLink);
             appendCaption(afterImage, "after-image");
             imageContent.append(details);
+            edit.addEventListener("click", () =>
+              startEntryEdit(entry, imageContent, edit),
+            );
             article.append(meta, imageContent);
+          } else if (entry.type === "file") {
+            const edit = document.createElement("button");
+            edit.type = "button";
+            edit.className = "secondary";
+            edit.textContent = "编辑";
+            actions.append(edit);
+            if (entry.content) {
+              const copy = document.createElement("button");
+              copy.type = "button";
+              copy.className = "secondary";
+              copy.textContent = "复制说明";
+              copy.addEventListener("click", async () => {
+                try {
+                  await copyText(entry.content);
+                  showToast("已复制附件说明");
+                } catch (error) {
+                  showToast(`复制失败：${error.message}`, true);
+                }
+              });
+              actions.append(copy);
+            }
+
+            const download = document.createElement("a");
+            download.className = "secondary-link";
+            download.href = `/api/files/${entry.id}/download`;
+            download.textContent = "下载";
+            actions.append(download, remove);
+            meta.append(metaLeft, actions);
+
+            const attachmentContent = document.createElement("div");
+            attachmentContent.className = "attachment-content";
+            const attachmentCard = document.createElement("div");
+            attachmentCard.className = "attachment-card";
+            const icon = document.createElement("span");
+            icon.className = "attachment-icon";
+            icon.textContent = "FILE";
+            const fileInfo = document.createElement("div");
+            fileInfo.style.minWidth = "0";
+            const filename = document.createElement("p");
+            filename.className = "file-name";
+            filename.textContent = entry.filename || "附件";
+            const size = document.createElement("span");
+            size.className = "file-size";
+            size.textContent = formatBytes(entry.size_bytes || 0);
+            fileInfo.append(filename, size);
+            attachmentCard.append(icon, fileInfo);
+            attachmentContent.append(attachmentCard);
+            if (entry.content) {
+              const note = document.createElement("pre");
+              note.dataset.entryId = String(entry.id);
+              note.textContent = entry.content;
+              attachmentContent.append(note);
+            }
+            edit.addEventListener("click", () =>
+              startEntryEdit(entry, attachmentContent, edit),
+            );
+            article.append(meta, attachmentContent);
           } else {
+            const edit = document.createElement("button");
+            edit.type = "button";
+            edit.className = "secondary";
+            edit.textContent = "编辑";
+
             const copy = document.createElement("button");
             copy.type = "button";
             copy.className = "secondary";
@@ -1044,7 +2237,11 @@
             content.dataset.entryId = String(entry.id);
             content.textContent = entry.content;
 
-            actions.append(copy, remove);
+            edit.addEventListener("click", () =>
+              startEntryEdit(entry, content, edit),
+            );
+
+            actions.append(edit, copy, remove);
             meta.append(metaLeft, actions);
             article.append(meta, content);
           }
@@ -1053,41 +2250,49 @@
         restoreScrollState(scrollState);
       }
 
-      async function loadEntries({ silent = false } = {}) {
+      async function loadEntries({ silent = false, force = false } = {}) {
         try {
           const data = await api("/api/entries");
-          if (entriesAreEqual(data.entries)) return;
+          setServerStatus(true);
+          if (!force && entriesAreEqual(data.entries)) return true;
           entries = data.entries;
           renderEntries({ preserveScroll: true });
+          return true;
         } catch (error) {
           if (!silent) {
             history.innerHTML = "";
             const message = document.createElement("div");
             message.className = "empty";
-            message.textContent = "暂时无法读取内容，请刷新页面重试。";
+            message.textContent = navigator.onLine
+              ? "服务器暂时无法连接，请稍后重试。"
+              : "当前处于离线状态，联网后会自动恢复。";
             history.appendChild(message);
             showToast(error.message, true);
           }
+          return false;
         }
       }
 
       async function saveEntry() {
         const { content, imagePosition } = readDraft();
         const bytes = byteLength(content);
-        const limit = pendingImage ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
-        if (!content.trim() && !pendingImage) {
-          showToast("请先输入文字或粘贴图片", true);
+        const pendingUpload = pendingImage || pendingAttachment;
+        const limit = pendingUpload ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
+        if (!content.trim() && !pendingUpload) {
+          showToast("请先记录想法、选择图片或添加附件", true);
           editor.focus();
-          return;
+          return false;
         }
         if (bytes > limit) {
           showToast(
-            pendingImage
-              ? "图片附带文字不能超过 12 KB"
+            pendingAttachment
+              ? "附件说明不能超过 12 KB"
+              : pendingImage
+                ? "图片附带文字不能超过 12 KB"
               : "单条内容不能超过 200 KB",
             true,
           );
-          return;
+          return false;
         }
 
         saveButton.dataset.loading = "true";
@@ -1095,19 +2300,37 @@
         updateCounter();
         try {
           let data;
-          if (pendingImage) {
-            const response = await fetch("/api/images", {
-              method: "POST",
-              headers: {
-                "Content-Type": pendingImage.type,
-                "X-Filename": encodeURIComponent(
-                  normalizedFilename(pendingImage),
-                ),
-                "X-Content": encodeURIComponent(content),
-                "X-Image-Position": String(imagePosition ?? 0),
-              },
-              body: pendingImage,
-            });
+          if (pendingAttachment) {
+            data = await uploadAttachment(pendingAttachment, content);
+          } else if (pendingImage) {
+            const controller = new AbortController();
+            const timeout = setTimeout(
+              () => controller.abort(),
+              IMAGE_UPLOAD_TIMEOUT_MS,
+            );
+            let response;
+            try {
+              response = await fetch("/api/images", {
+                method: "POST",
+                headers: {
+                  "Content-Type": pendingImage.type,
+                  "X-Filename": encodeURIComponent(
+                    normalizedFilename(pendingImage),
+                  ),
+                  "X-Content": encodeURIComponent(content),
+                  "X-Image-Position": String(imagePosition ?? 0),
+                },
+                body: pendingImage,
+                signal: controller.signal,
+              });
+            } catch (error) {
+              if (error.name === "AbortError") {
+                throw new Error("图片上传超过 90 秒，请检查网络后重试");
+              }
+              throw error;
+            } finally {
+              clearTimeout(timeout);
+            }
             data = await response.json().catch(() => ({}));
             if (!response.ok) {
               throw new Error(
@@ -1126,15 +2349,93 @@
           renderEntries();
           showToast(
             data.entry.type === "image"
-              ? "图片和文字已保存到中转站"
-              : "已保存，Windows 端可以复制了",
+              ? "图片和记忆已存入 Memory"
+              : data.entry.type === "file"
+                ? "附件已存入 Memory"
+                : "记忆已存入 Memory",
           );
+          return true;
         } catch (error) {
           showToast(error.message, true);
+          return false;
         } finally {
           delete saveButton.dataset.loading;
-          saveButton.textContent = "保存到中转站";
+          saveButton.textContent = "存入 Memory";
           updateCounter();
+        }
+      }
+
+      async function uploadAttachment(file, content) {
+        let uploadId = "";
+        try {
+          const initialized = await api("/api/file-uploads", {
+            method: "POST",
+            body: JSON.stringify({
+              filename: file.name || `attachment-${Date.now()}`,
+              mime_type: file.type || "application/octet-stream",
+              size: file.size,
+              content,
+            }),
+          });
+          uploadId = initialized.upload_id;
+          const chunkSize = Math.min(
+            initialized.chunk_size || FILE_CHUNK_BYTES,
+            FILE_CHUNK_BYTES,
+          );
+          let offset = initialized.received || 0;
+          while (offset < file.size) {
+            const chunk = file.slice(
+              offset,
+              Math.min(offset + chunkSize, file.size),
+            );
+            let response;
+            let payload;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              try {
+                response = await fetch(`/api/file-uploads/${uploadId}`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/octet-stream",
+                    "X-Upload-Offset": String(offset),
+                  },
+                  body: chunk,
+                });
+                payload = await response.json().catch(() => ({}));
+                if (response.ok) break;
+              } catch (error) {
+                if (attempt === 2) throw error;
+              }
+              if (attempt < 2) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, 700 * (attempt + 1)),
+                );
+              }
+            }
+            if (!response?.ok) {
+              throw new Error(
+                payload?.error ||
+                  `附件分片上传失败（${response?.status || "网络错误"}）`,
+              );
+            }
+            offset = payload.received;
+            const progress =
+              file.size === 0
+                ? 100
+                : Math.min(100, Math.round((offset / file.size) * 100));
+            saveButton.textContent = `正在上传 ${progress}%`;
+          }
+          return await api(`/api/file-uploads/${uploadId}/complete`, {
+            method: "POST",
+            body: "{}",
+          });
+        } catch (error) {
+          if (uploadId) {
+            fetch(`/api/file-uploads/${uploadId}`, {
+              method: "DELETE",
+              keepalive: true,
+            }).catch(() => {});
+          }
+          throw error;
         }
       }
 
@@ -1241,7 +2542,6 @@
         pendingImageUrl = "";
         pendingImageNode = null;
         imageInput.value = "";
-        cameraInput.value = "";
       }
 
       function removePendingImage({ focus = true } = {}) {
@@ -1261,9 +2561,41 @@
         updateCounter();
       }
 
+      function releasePendingAttachment() {
+        pendingAttachment = null;
+        pendingAttachmentName.textContent = "";
+        pendingAttachmentSize.textContent = "";
+        pendingAttachmentPanel.hidden = true;
+      }
+
+      function removePendingAttachment({ focus = true } = {}) {
+        releasePendingAttachment();
+        if (focus) editor.focus();
+        updateCounter();
+      }
+
+      function stageAttachment(file) {
+        if (!file) return false;
+        if (file.size > MAX_FILE_BYTES) {
+          showToast("单个附件不能超过 100 MB", true);
+          return false;
+        }
+        if (pendingImage) removePendingImage({ focus: false });
+        pendingAttachment = file;
+        pendingAttachmentName.textContent =
+          file.name || `attachment-${Date.now()}`;
+        pendingAttachmentSize.textContent =
+          `${formatBytes(file.size)} · 上限 100 MB`;
+        pendingAttachmentPanel.hidden = false;
+        updateCounter();
+        showToast(`已选择附件：${pendingAttachmentName.textContent}`);
+        return true;
+      }
+
       function clearEditor() {
         editor.replaceChildren();
         releasePendingImage();
+        releasePendingAttachment();
         savedRange = null;
         savedCaretPosition = 0;
         filePickerPosition = null;
@@ -1292,19 +2624,328 @@
         return { firstNode, lastNode };
       }
 
-      function stageImage(file, preferredPosition = null) {
-        if (!file) return;
+      function canvasToBlob(canvas, type, quality) {
+        return new Promise((resolve, reject) => {
+          canvas.toBlob(
+            (blob) => {
+              if (blob) resolve(blob);
+              else reject(new Error("浏览器无法编码压缩后的图片"));
+            },
+            type,
+            quality,
+          );
+        });
+      }
+
+      async function createQuickPhoto(
+        source,
+        sourceWidth,
+        sourceHeight,
+      ) {
+        if (!sourceWidth || !sourceHeight) {
+          throw new Error("摄像头画面尚未准备完成");
+        }
+        const scale = Math.min(
+          1,
+          QUICK_PHOTO_MAX_EDGE / Math.max(sourceWidth, sourceHeight),
+        );
+        const width = Math.max(1, Math.round(sourceWidth * scale));
+        const height = Math.max(1, Math.round(sourceHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("浏览器无法处理摄像头画面");
+        context.drawImage(source, 0, 0, width, height);
+        try {
+          const blob = await canvasToBlob(
+            canvas,
+            "image/jpeg",
+            QUICK_PHOTO_QUALITY,
+          );
+          if (blob.type !== "image/jpeg") {
+            throw new Error("当前浏览器无法生成快速照片");
+          }
+          return {
+            file: new File(
+              [blob],
+              `quick-photo-${Date.now()}.jpg`,
+              { type: "image/jpeg" },
+            ),
+            width,
+            height,
+          };
+        } finally {
+          canvas.width = 1;
+          canvas.height = 1;
+        }
+      }
+
+      function stopQuickCamera() {
+        if (cameraStream) {
+          cameraStream.getTracks().forEach((track) => track.stop());
+        }
+        cameraStream = null;
+        cameraPreview.srcObject = null;
+        cameraModal.hidden = true;
+        cameraStatus.textContent = "照片会自动缩小并立即上传";
+        captureCamera.disabled = false;
+        cancelCamera.disabled = false;
+        quickCamera.disabled = false;
+      }
+
+      async function openQuickCamera() {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          showToast("当前浏览器不支持网页相机，请使用“选择图片”添加照片", true);
+          return;
+        }
+        cameraCapturePosition = savedCaretPosition;
+        quickCamera.disabled = true;
+        cameraStatus.textContent = "正在打开后置摄像头…";
+        cameraModal.hidden = false;
+        try {
+          cameraStream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 960 },
+              frameRate: { ideal: 15, max: 30 },
+              resizeMode: "crop-and-scale",
+            },
+          });
+          cameraPreview.srcObject = cameraStream;
+          await cameraPreview.play();
+          cameraStatus.textContent =
+            "点击“拍照并上传”，通常可在10秒内完成";
+          captureCamera.focus();
+        } catch (error) {
+          stopQuickCamera();
+          const denied =
+            error.name === "NotAllowedError" ||
+            error.name === "SecurityError";
+          showToast(
+            denied
+              ? "请允许浏览器使用摄像头后重试"
+              : `无法打开摄像头：${error.message}`,
+            true,
+          );
+        }
+      }
+
+      async function captureAndUploadQuickPhoto() {
+        captureCamera.disabled = true;
+        cancelCamera.disabled = true;
+        cameraStatus.textContent = "正在生成快速照片…";
+        const startedAt = performance.now();
+        try {
+          const photo = await createQuickPhoto(
+            cameraPreview,
+            cameraPreview.videoWidth,
+            cameraPreview.videoHeight,
+          );
+          stopQuickCamera();
+          const staged = await stageImage(
+            photo.file,
+            cameraCapturePosition,
+          );
+          if (!staged) return;
+          const saved = await saveEntry();
+          if (saved) {
+            const elapsedSeconds = (
+              (performance.now() - startedAt) /
+              1000
+            ).toFixed(1);
+            showToast(
+              `快速照片已上传：${photo.width}×${photo.height}、${formatBytes(photo.file.size)}，用时 ${elapsedSeconds} 秒`,
+            );
+          }
+        } catch (error) {
+          stopQuickCamera();
+          showToast(`快速拍照失败：${error.message}`, true);
+        }
+      }
+
+      function compressedFilename(filename, extension) {
+        const name = filename || `image-${Date.now()}`;
+        const dot = name.lastIndexOf(".");
+        const stem = dot > 0 ? name.slice(0, dot) : name;
+        return `${stem}.${extension}`;
+      }
+
+      async function encodeOptimizedImage(canvas, quality) {
+        const webpBlob = await canvasToBlob(
+          canvas,
+          "image/webp",
+          quality,
+        );
+        if (webpBlob.type === "image/webp") {
+          return {
+            blob: webpBlob,
+            type: "image/webp",
+            extension: "webp",
+          };
+        }
+        const jpegBlob = await canvasToBlob(
+          canvas,
+          "image/jpeg",
+          quality,
+        );
+        if (jpegBlob.type !== "image/jpeg") {
+          throw new Error("当前浏览器无法编码压缩图片");
+        }
+        return {
+          blob: jpegBlob,
+          type: "image/jpeg",
+          extension: "jpg",
+        };
+      }
+
+      async function optimizeImage(file) {
+        const bitmap = await createImageBitmap(file);
+        const sourceWidth = bitmap.width;
+        const sourceHeight = bitmap.height;
+        const scale = Math.min(
+          1,
+          MAX_IMAGE_EDGE / Math.max(sourceWidth, sourceHeight),
+        );
+        const width = Math.max(1, Math.round(sourceWidth * scale));
+        const height = Math.max(1, Math.round(sourceHeight * scale));
+        const resized = width !== sourceWidth || height !== sourceHeight;
+
+        if (
+          !resized &&
+          file.size <= IMAGE_COMPRESSION_THRESHOLD_BYTES
+        ) {
+          bitmap.close();
+          return {
+            file,
+            compressed: false,
+            resized: false,
+            sourceWidth,
+            sourceHeight,
+            width,
+            height,
+          };
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          bitmap.close();
+          throw new Error("浏览器无法处理这张图片");
+        }
+        context.drawImage(bitmap, 0, 0, width, height);
+
+        let bestImage = null;
+        try {
+          for (const quality of IMAGE_COMPRESSION_QUALITIES) {
+            const encoded = await encodeOptimizedImage(canvas, quality);
+            if (!bestImage || encoded.blob.size < bestImage.blob.size) {
+              bestImage = encoded;
+            }
+            if (
+              encoded.blob.size <= IMAGE_COMPRESSION_TARGET_BYTES
+            ) {
+              break;
+            }
+          }
+        } finally {
+          bitmap.close();
+          canvas.width = 1;
+          canvas.height = 1;
+        }
+
+        if (
+          !bestImage ||
+          (!resized && bestImage.blob.size >= file.size)
+        ) {
+          return {
+            file,
+            compressed: false,
+            resized: false,
+            sourceWidth,
+            sourceHeight,
+            width,
+            height,
+          };
+        }
+        return {
+          file: new File(
+            [bestImage.blob],
+            compressedFilename(file.name, bestImage.extension),
+            {
+              type: bestImage.type,
+              lastModified: file.lastModified,
+            },
+          ),
+          compressed: true,
+          resized,
+          sourceWidth,
+          sourceHeight,
+          width,
+          height,
+        };
+      }
+
+      async function prepareImage(file) {
+        if (file.type === "image/gif") {
+          return { file, compressed: false, resized: false };
+        }
+        try {
+          return await optimizeImage(file);
+        } catch (error) {
+          if (file.size <= MAX_IMAGE_BYTES) {
+            showToast(`自动优化失败，将使用原图：${error.message}`, true);
+            return { file, compressed: false, resized: false };
+          }
+          throw error;
+        }
+      }
+
+      async function stageImage(file, preferredPosition = null) {
+        if (!file) return false;
         if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
           showToast("仅支持 PNG、JPEG、WebP 和 GIF 图片", true);
-          return;
+          return false;
         }
         if (!file.size) {
           showToast("图片不能为空", true);
-          return;
+          return false;
         }
+        if (imagePreparing) {
+          showToast("正在处理上一张图片，请稍候", true);
+          return false;
+        }
+        releasePendingAttachment();
+
+        const originalSize = file.size;
+        let prepared;
+        imagePreparing = true;
+        chooseImage.disabled = true;
+        updateCounter();
+        if (file.type !== "image/gif") {
+          showToast("正在优化图片，请稍候…");
+        }
+        try {
+          prepared = await prepareImage(file);
+        } catch (error) {
+          showToast(`图片压缩失败：${error.message}`, true);
+          return false;
+        } finally {
+          imagePreparing = false;
+          chooseImage.disabled = false;
+          updateCounter();
+        }
+        file = prepared.file;
         if (file.size > MAX_IMAGE_BYTES) {
-          showToast("单张图片不能超过 10 MB", true);
-          return;
+          showToast(
+            "自动优化后仍超过 10 MB，请改用较小的图片",
+            true,
+          );
+          return false;
         }
 
         const currentRange = currentEditorRange();
@@ -1364,7 +3005,17 @@
         selectRange(insertionRange);
         savedCaretPosition = insertionPosition;
         updateCounter();
-        showToast("图片已插入光标位置，点击保存后才会发送");
+        if (prepared.compressed) {
+          const dimensions = prepared.resized
+            ? `${prepared.sourceWidth}×${prepared.sourceHeight} → ${prepared.width}×${prepared.height}`
+            : `${prepared.width}×${prepared.height}（尺寸不变）`;
+          showToast(
+            `图片已优化：${dimensions}，${formatBytes(originalSize)} → ${formatBytes(file.size)}`,
+          );
+        } else {
+          showToast("图片已插入光标位置，点击保存后才会发送");
+        }
+        return true;
       }
 
       async function deleteEntry(id) {
@@ -1380,14 +3031,19 @@
 
       async function clearEntries() {
         const confirmed = window.confirm(
-          "确定清空全部文字和图片吗？原始图片文件也会永久删除，此操作无法撤销。",
+          "确定清空全部文字、图片和附件吗？服务器中的原始文件与未完成上传也会永久删除，此操作无法撤销。",
         );
         if (!confirmed) return;
         try {
-          await api("/api/entries", { method: "DELETE" });
+          const result = await api("/api/entries", { method: "DELETE" });
           entries = [];
           renderEntries();
-          showToast("历史内容已全部清空");
+          const uploadMessage = result.cancelled_uploads
+            ? `，并取消 ${result.cancelled_uploads} 个未完成上传`
+            : "";
+          showToast(
+            `已永久删除 ${result.deleted || 0} 条记忆${uploadMessage}`,
+          );
         } catch (error) {
           showToast(error.message, true);
         }
@@ -1426,28 +3082,50 @@
       document.addEventListener("selectionchange", rememberCaret);
       editor.addEventListener("blur", (event) => {
         rememberCaret();
-        if (event.relatedTarget === chooseImage) {
+        if (
+          event.relatedTarget === chooseImage ||
+          event.relatedTarget === quickCamera
+        ) {
           filePickerPosition = savedCaretPosition;
         }
       });
       saveButton.addEventListener("click", saveEntry);
       clearButton.addEventListener("click", clearEntries);
+      removeAttachment.addEventListener("click", () =>
+        removePendingAttachment(),
+      );
       chooseImage.addEventListener("mousedown", (event) => {
         event.preventDefault();
         filePickerPosition = savedCaretPosition;
       });
       chooseImage.addEventListener("click", () => imageInput.click());
-      takePhoto.addEventListener("mousedown", (event) => {
+      quickCamera.addEventListener("mousedown", (event) => {
         event.preventDefault();
-        filePickerPosition = savedCaretPosition;
+        cameraCapturePosition = savedCaretPosition;
       });
-      takePhoto.addEventListener("click", () => cameraInput.click());
+      quickCamera.addEventListener("click", openQuickCamera);
+      cancelCamera.addEventListener("click", stopQuickCamera);
+      captureCamera.addEventListener(
+        "click",
+        captureAndUploadQuickPhoto,
+      );
+      cameraModal.addEventListener("click", (event) => {
+        if (event.target === cameraModal) stopQuickCamera();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !cameraModal.hidden) {
+          stopQuickCamera();
+        }
+      });
+      window.addEventListener("pagehide", stopQuickCamera);
       imageInput.addEventListener("change", () => {
-        stageImage(imageInput.files?.[0], filePickerPosition);
-        filePickerPosition = null;
-      });
-      cameraInput.addEventListener("change", () => {
-        stageImage(cameraInput.files?.[0], filePickerPosition);
+        const file = imageInput.files?.[0];
+        imageInput.value = "";
+        if (file && ALLOWED_IMAGE_TYPES.has(file.type)) {
+          stageImage(file, filePickerPosition);
+        } else {
+          stageAttachment(file);
+        }
         filePickerPosition = null;
       });
       for (const eventName of ["dragenter", "dragover"]) {
@@ -1463,23 +3141,113 @@
         });
       }
       editor.addEventListener("drop", (event) => {
-        const image = Array.from(event.dataTransfer.files || []).find(
-          (file) => ALLOWED_IMAGE_TYPES.has(file.type),
-        );
-        if (image) stageImage(image);
+        const file = event.dataTransfer.files?.[0];
+        if (!file) return;
+        if (ALLOWED_IMAGE_TYPES.has(file.type)) {
+          stageImage(file);
+        } else {
+          stageAttachment(file);
+        }
       });
       editor.addEventListener("paste", (event) => {
-        const imageFiles = Array.from(
-          event.clipboardData?.files || [],
-        ).filter((file) => ALLOWED_IMAGE_TYPES.has(file.type));
+        const file = event.clipboardData?.files?.[0];
         event.preventDefault();
-        if (imageFiles.length) {
-          stageImage(imageFiles[0]);
+        if (file) {
+          if (ALLOWED_IMAGE_TYPES.has(file.type)) {
+            stageImage(file);
+          } else {
+            stageAttachment(file);
+          }
           return;
         }
         insertPlainText(event.clipboardData?.getData("text/plain") || "");
       });
 
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        deferredInstallPrompt = event;
+        updateInstallButton();
+      });
+      installButton.addEventListener("click", async () => {
+        if (!deferredInstallPrompt) {
+          showInstallHelp();
+          return;
+        }
+        installButton.disabled = true;
+        try {
+          await deferredInstallPrompt.prompt();
+          const choice = await deferredInstallPrompt.userChoice;
+          if (choice.outcome === "accepted") {
+            deferredInstallPrompt = null;
+            installButton.hidden = true;
+          }
+        } finally {
+          installButton.disabled = false;
+        }
+      });
+      closeInstallHelp.addEventListener("click", () => {
+        installModal.hidden = true;
+        installButton.focus();
+      });
+      installModal.addEventListener("click", (event) => {
+        if (event.target === installModal) installModal.hidden = true;
+      });
+      forceRefreshButton.addEventListener("click", async () => {
+        forceRefreshButton.disabled = true;
+        forceRefreshButton.textContent = "刷新中…";
+        try {
+          await updateApplicationShell();
+          const online = await checkServerStatus();
+          const loaded = await loadEntries({ force: true });
+          if (online && loaded) {
+            showToast("已强制刷新为服务器最新内容");
+          }
+        } finally {
+          forceRefreshButton.disabled = false;
+          forceRefreshButton.textContent = "强制刷新";
+        }
+      });
+      window.addEventListener("appinstalled", () => {
+        deferredInstallPrompt = null;
+        installButton.hidden = true;
+        document.documentElement.dataset.standalone = "true";
+      });
+      window.addEventListener("online", () => {
+        checkServerStatus();
+        loadEntries();
+      });
+      window.addEventListener("offline", () => setServerStatus(false));
+
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (reloadingForServiceWorker) return;
+          reloadingForServiceWorker = true;
+          window.location.reload();
+        });
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("/service-worker.js?v=14", {
+              updateViaCache: "none",
+            })
+            .then(async (registration) => {
+              if (registration.waiting) {
+                registration.waiting.postMessage({
+                  type: "ACTIVATE_UPDATE",
+                });
+              }
+              await registration.update();
+            })
+            .catch(() => {});
+        });
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") {
+            updateApplicationShell();
+          }
+        });
+      }
+
+      updateInstallButton();
+      setServerStatus(navigator.onLine);
       updateCounter();
       loadEntries();
       setInterval(() => loadEntries({ silent: true }), 30000);

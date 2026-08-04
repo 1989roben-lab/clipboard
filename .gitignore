@@ -1,14 +1,23 @@
 # This workspace also contains private server setup material. Only the
-# standalone LAN clipboard application is allowed into this repository.
+# standalone Memory application is allowed into this repository.
 *
 
 !.gitignore
 !.dockerignore
 !Dockerfile
 !README.md
+!PROJECT_HANDOFF.md
 !compose.yaml
 !server.py
 !static/
 !static/index.html
+!static/manifest.webmanifest
+!static/service-worker.js
+!static/icons/
+!static/icons/apple-touch-icon.png
+!static/icons/icon-192.png
+!static/icons/icon-512.png
+!static/icons/icon-maskable-512.png
+!static/icons/memory-icon-master.png
 !tests/
 !tests/integration_test.py
