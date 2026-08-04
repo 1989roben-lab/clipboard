@@ -249,9 +249,10 @@ def main() -> None:
             assert "Windows" not in page_text
             assert 'id="install-modal"' in page_text
             assert 'loadEntries({ force: true })' in page_text
-            assert 'register("/service-worker.js?v=17"' in page_text
+            assert 'register("/service-worker.js?v=18"' in page_text
             assert "border: none;" in page_text
             assert "backdrop-filter: blur(22px) saturate(180%);" in page_text
+            assert "inset 0 1px 0 rgba(255, 255, 255, 0.92)" not in page_text
             assert ".image-preview-link" in page_text
             assert "background: #fff;" in page_text
             assert 'apple-touch-icon.png?v=14' in page_text
@@ -261,7 +262,7 @@ def main() -> None:
             assert page_headers.get_content_type() == "text/html"
             assert page_headers["Cache-Control"] == "no-store, max-age=0"
             versioned_page, versioned_page_headers = server.call(
-                "/?app=v17"
+                "/?app=v18"
             )
             assert versioned_page == page
             assert (
@@ -275,7 +276,7 @@ def main() -> None:
             manifest = json.loads(manifest_body)
             assert manifest["display"] == "standalone"
             assert manifest["name"] == "Memory"
-            assert manifest["start_url"] == "/?app=v17"
+            assert manifest["start_url"] == "/?app=v18"
             assert all("?v=14" in icon["src"] for icon in manifest["icons"])
             assert {icon["sizes"] for icon in manifest["icons"]} >= {
                 "192x192",
@@ -294,8 +295,8 @@ def main() -> None:
             worker_text = worker.decode("utf-8")
             assert 'url.pathname.startsWith("/api/")' in worker_text
             assert 'request.mode === "navigate"' in worker_text
-            assert '.catch(() => caches.match("/?app=v17"))' in worker_text
-            assert 'memory-shell-v17' in worker_text
+            assert '.catch(() => caches.match("/?app=v18"))' in worker_text
+            assert 'memory-shell-v18' in worker_text
             assert 'ACTIVATE_UPDATE' in worker_text
             assert worker_headers.get_content_type() == "application/javascript"
             assert worker_headers["Cache-Control"] == "no-cache"
