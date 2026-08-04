@@ -249,8 +249,9 @@ def main() -> None:
             assert "Windows" not in page_text
             assert 'id="install-modal"' in page_text
             assert 'loadEntries({ force: true })' in page_text
-            assert 'register("/service-worker.js?v=16"' in page_text
-            assert "backdrop-filter: none;" in page_text
+            assert 'register("/service-worker.js?v=17"' in page_text
+            assert "border: none;" in page_text
+            assert "backdrop-filter: blur(22px) saturate(180%);" in page_text
             assert ".image-preview-link" in page_text
             assert "background: #fff;" in page_text
             assert 'apple-touch-icon.png?v=14' in page_text
@@ -260,7 +261,7 @@ def main() -> None:
             assert page_headers.get_content_type() == "text/html"
             assert page_headers["Cache-Control"] == "no-store, max-age=0"
             versioned_page, versioned_page_headers = server.call(
-                "/?app=v16"
+                "/?app=v17"
             )
             assert versioned_page == page
             assert (
@@ -274,7 +275,7 @@ def main() -> None:
             manifest = json.loads(manifest_body)
             assert manifest["display"] == "standalone"
             assert manifest["name"] == "Memory"
-            assert manifest["start_url"] == "/?app=v16"
+            assert manifest["start_url"] == "/?app=v17"
             assert all("?v=14" in icon["src"] for icon in manifest["icons"])
             assert {icon["sizes"] for icon in manifest["icons"]} >= {
                 "192x192",
@@ -293,8 +294,8 @@ def main() -> None:
             worker_text = worker.decode("utf-8")
             assert 'url.pathname.startsWith("/api/")' in worker_text
             assert 'request.mode === "navigate"' in worker_text
-            assert '.catch(() => caches.match("/?app=v16"))' in worker_text
-            assert 'memory-shell-v16' in worker_text
+            assert '.catch(() => caches.match("/?app=v17"))' in worker_text
+            assert 'memory-shell-v17' in worker_text
             assert 'ACTIVATE_UPDATE' in worker_text
             assert worker_headers.get_content_type() == "application/javascript"
             assert worker_headers["Cache-Control"] == "no-cache"

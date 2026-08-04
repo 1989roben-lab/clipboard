@@ -80,7 +80,7 @@ Service Worker 只缓存 HTML、manifest 和应用图标，不缓存 `/api/`、`
 3. `static/index.html` 注册 Service Worker 的查询参数。
 4. `static/manifest.webmanifest` 的 `start_url` 和图标查询参数。
 
-当前应用外壳版本为 `v16`，图标资源查询参数为 `v14`。Chrome、macOS Dock
+当前应用外壳版本为 `v17`，图标资源查询参数为 `v14`。Chrome、macOS Dock
 和已安装的 PWA 可能长期保留旧图标。
 即使服务端图标已经更新，已安装应用也不一定立即刷新。排查时先确认公网 manifest
 和图标返回最新内容；仍显示旧图时，应删除旧应用，在 Chrome 的
@@ -144,6 +144,6 @@ Cloudflare、GitHub 或服务器授权信息只保存在服务器的私有配置
 
 - 生产容器：健康。
 - 公网域名：可访问。
-- PWA 缓存版本：`v16`。
+- PWA 缓存版本：`v17`。
 - 图标：蓝紫色半透明记忆薄片，新图标已用于 iOS、PWA 和 maskable 尺寸。
 - 最近一次图标发布前后记录数量一致，持久化数据未受影响。
