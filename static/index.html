@@ -1158,29 +1158,27 @@
       .install-button,
       .refresh-button {
         min-height: 42px;
-        border: 1px solid rgba(255, 255, 255, 0.76);
+        border: 1px solid rgba(15, 23, 42, 0.08);
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.48);
+        background: #fff;
         color: rgba(26, 28, 33, 0.78);
-        box-shadow:
-          0 8px 22px rgba(55, 76, 103, 0.1),
-          inset 0 1px 0 rgba(255, 255, 255, 0.92);
-        -webkit-backdrop-filter: blur(22px) saturate(180%);
-        backdrop-filter: blur(22px) saturate(180%);
+        box-shadow: 0 6px 18px rgba(45, 55, 72, 0.08);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
       }
 
       .install-button {
-        background: rgba(0, 122, 255, 0.86);
-        color: #fff;
+        background: #fff;
+        color: #0878df;
       }
 
       .install-button:hover,
       .refresh-button:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.68);
+        background: #f8fafc;
       }
 
       .install-button:hover {
-        background: rgba(0, 104, 218, 0.9);
+        background: #f8fafc;
       }
 
       .status-dot {
@@ -3215,7 +3213,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=15", {
+            .register("/service-worker.js?v=16", {
               updateViaCache: "none",
             })
             .then(async (registration) => {
