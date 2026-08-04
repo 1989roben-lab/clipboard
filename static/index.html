@@ -687,18 +687,7 @@
         max-height: 520px;
         place-items: center;
         border-radius: 12px;
-        background:
-          linear-gradient(45deg, #eef1ed 25%, transparent 25%),
-          linear-gradient(-45deg, #eef1ed 25%, transparent 25%),
-          linear-gradient(45deg, transparent 75%, #eef1ed 75%),
-          linear-gradient(-45deg, transparent 75%, #eef1ed 75%),
-          #f8f9f6;
-        background-position:
-          0 0,
-          0 8px,
-          8px -8px,
-          -8px 0;
-        background-size: 16px 16px;
+        background: #fff;
       }
 
       .image-preview {
@@ -3226,7 +3215,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=14", {
+            .register("/service-worker.js?v=15", {
               updateViaCache: "none",
             })
             .then(async (registration) => {
