@@ -65,6 +65,7 @@ MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_FILE_CHUNK_BYTES = 8 * 1024 * 1024
 FILE_UPLOAD_TTL_SECONDS = 24 * 60 * 60
 ENTRY_PATH = re.compile(r"^/api/entries/([1-9][0-9]*)$")
+TODO_ITEM_PATH = re.compile(r"^/api/todo-items/([1-9][0-9]*)$")
 IMAGE_PATH = re.compile(
     r"^/api/images/([1-9][0-9]*)(/download)?$"
 )
@@ -87,6 +88,7 @@ def connect_db() -> sqlite3.Connection:
     connection = sqlite3.connect(DB_PATH, timeout=5)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA busy_timeout = 5000")
+    connection.execute("PRAGMA foreign_keys = ON")
     return connection
 
 
@@ -183,6 +185,32 @@ def initialize_database() -> None:
                 received_size INTEGER NOT NULL DEFAULT 0,
                 created_at REAL NOT NULL
             )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS todo_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                stage INTEGER NOT NULL DEFAULT 1
+                    CHECK (stage BETWEEN 1 AND 5),
+                position INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                ),
+                updated_at TEXT NOT NULL DEFAULT (
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                ),
+                FOREIGN KEY (entry_id) REFERENCES entries(id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS todo_items_entry_position_idx
+            ON todo_items(entry_id, position, id)
             """
         )
     reconcile_uploads()
@@ -338,8 +366,11 @@ def clean_mime_type(raw_mime_type: object) -> str:
     return mime_type
 
 
-def public_entry(row: sqlite3.Row) -> dict[str, Any]:
-    return {
+def public_entry(
+    row: sqlite3.Row,
+    connection: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    entry = {
         "id": row["id"],
         "type": row["entry_type"],
         "content": row["content"],
@@ -350,6 +381,27 @@ def public_entry(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+    if row["entry_type"] == "todo":
+        if connection is None:
+            raise ValueError("todo entries require a database connection")
+        items = connection.execute(
+            """
+            SELECT id, content, stage
+            FROM todo_items
+            WHERE entry_id = ?
+            ORDER BY position, id
+            """,
+            (row["id"],),
+        ).fetchall()
+        entry["items"] = [
+            {
+                "id": item["id"],
+                "content": item["content"],
+                "stage": item["stage"],
+            }
+            for item in items
+        ]
+    return entry
 
 
 class ClipboardHandler(BaseHTTPRequestHandler):
@@ -422,7 +474,11 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                 ).fetchall()
             self.send_json(
                 HTTPStatus.OK,
-                {"entries": [public_entry(row) for row in rows]},
+                {
+                    "entries": [
+                        public_entry(row, connection) for row in rows
+                    ]
+                },
             )
             return
 
@@ -448,7 +504,7 @@ class ClipboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if self.path == "/api/entries":
-            self.create_text_entry()
+            self.create_entry()
             return
         if self.path == "/api/images":
             self.create_image_entry()
@@ -467,24 +523,21 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "未找到该接口"})
 
     def do_PATCH(self) -> None:
+        todo_item_match = TODO_ITEM_PATH.fullmatch(self.path)
+        if todo_item_match:
+            self.update_todo_stage(int(todo_item_match.group(1)))
+            return
         match = ENTRY_PATH.fullmatch(self.path)
         if match:
-            self.update_text_entry(int(match.group(1)))
+            self.update_entry(int(match.group(1)))
             return
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "未找到该接口"})
 
-    def update_text_entry(self, entry_id: int) -> None:
+    def update_entry(self, entry_id: int) -> None:
         payload = self.read_json_body()
         if payload is None:
             return
 
-        content = payload.get("content")
-        if not isinstance(content, str):
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "内容必须是文本"},
-            )
-            return
         with connect_db() as connection:
             existing = connection.execute(
                 """
@@ -501,6 +554,17 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                 )
                 return
             entry_type = existing["entry_type"]
+            if entry_type == "todo":
+                self.update_todo_entry(connection, entry_id, payload)
+                return
+
+            content = payload.get("content")
+            if not isinstance(content, str):
+                self.send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "内容必须是文本"},
+                )
+                return
             if entry_type == "text" and not content.strip():
                 self.send_json(
                     HTTPStatus.BAD_REQUEST,
@@ -550,11 +614,25 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                 """,
                 (entry_id,),
             ).fetchone()
-        self.send_json(HTTPStatus.OK, {"entry": public_entry(row)})
+        self.send_json(
+            HTTPStatus.OK,
+            {"entry": public_entry(row, connection)},
+        )
 
-    def create_text_entry(self) -> None:
+    def create_entry(self) -> None:
         payload = self.read_json_body()
         if payload is None:
+            return
+
+        entry_type = payload.get("type", "text")
+        if entry_type == "todo":
+            self.create_todo_entry(payload)
+            return
+        if entry_type != "text":
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "不支持的记录类型"},
+            )
             return
 
         content = payload.get("content")
@@ -580,8 +658,14 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         with connect_db() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO entries (content, entry_type)
-                VALUES (?, 'text')
+                INSERT INTO entries (
+                    content, entry_type, created_at, updated_at
+                )
+                VALUES (
+                    ?, 'text',
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                )
                 """,
                 (content,),
             )
@@ -601,7 +685,269 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         unlink_uploads(expired_uploads)
         self.send_json(
             HTTPStatus.CREATED,
-            {"entry": public_entry(row)},
+            {"entry": public_entry(row, connection)},
+        )
+
+    def create_todo_entry(self, payload: dict[str, Any]) -> None:
+        raw_items = payload.get("items")
+        if not isinstance(raw_items, list):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "待办项目必须是列表"},
+            )
+            return
+        items = [
+            item.strip()
+            for item in raw_items
+            if isinstance(item, str) and item.strip()
+        ]
+        if len(items) != len(raw_items):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "每个待办项目都必须是非空文本"},
+            )
+            return
+        if not items:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "请至少添加一个待办项目"},
+            )
+            return
+        if sum(len(item.encode("utf-8")) for item in items) > MAX_CONTENT_BYTES:
+            self.send_json(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                {"error": "待办项目合计不能超过 200 KB"},
+            )
+            return
+
+        with connect_db() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO entries (
+                    content, entry_type, created_at, updated_at
+                )
+                VALUES (
+                    '', 'todo',
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                )
+                """
+            )
+            entry_id = cursor.lastrowid
+            connection.executemany(
+                """
+                INSERT INTO todo_items (entry_id, content, stage, position)
+                VALUES (?, ?, 1, ?)
+                """,
+                [
+                    (entry_id, content, position)
+                    for position, content in enumerate(items)
+                ],
+            )
+            expired_uploads = prune_entries(connection)
+            row = connection.execute(
+                """
+                SELECT
+                    id, entry_type, content, filename,
+                    mime_type, size_bytes, image_position, created_at,
+                    updated_at
+                FROM entries
+                WHERE id = ?
+                """,
+                (entry_id,),
+            ).fetchone()
+            entry = public_entry(row, connection)
+        unlink_uploads(expired_uploads)
+        self.send_json(HTTPStatus.CREATED, {"entry": entry})
+
+    def update_todo_entry(
+        self,
+        connection: sqlite3.Connection,
+        entry_id: int,
+        payload: dict[str, Any],
+    ) -> None:
+        raw_items = payload.get("items")
+        if not isinstance(raw_items, list) or not raw_items:
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "待办清单至少需要一个项目"},
+            )
+            return
+
+        normalized: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
+        total_bytes = 0
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                self.send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "待办项目格式无效"},
+                )
+                return
+            content = raw_item.get("content")
+            stage = raw_item.get("stage")
+            item_id = raw_item.get("id")
+            if not isinstance(content, str) or not content.strip():
+                self.send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "待办项目内容不能为空"},
+                )
+                return
+            if (
+                not isinstance(stage, int)
+                or isinstance(stage, bool)
+                or stage < 1
+                or stage > 5
+            ):
+                self.send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "Stage 必须是 1 到 5"},
+                )
+                return
+            if item_id is not None:
+                if (
+                    not isinstance(item_id, int)
+                    or isinstance(item_id, bool)
+                    or item_id <= 0
+                    or item_id in seen_ids
+                ):
+                    self.send_json(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": "待办项目 ID 无效或重复"},
+                    )
+                    return
+                seen_ids.add(item_id)
+            content = content.strip()
+            total_bytes += len(content.encode("utf-8"))
+            normalized.append(
+                {"id": item_id, "content": content, "stage": stage}
+            )
+
+        if total_bytes > MAX_CONTENT_BYTES:
+            self.send_json(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                {"error": "待办项目合计不能超过 200 KB"},
+            )
+            return
+
+        existing_ids = {
+            row["id"]
+            for row in connection.execute(
+                "SELECT id FROM todo_items WHERE entry_id = ?",
+                (entry_id,),
+            ).fetchall()
+        }
+        if not seen_ids.issubset(existing_ids):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "待办项目不属于这张清单"},
+            )
+            return
+
+        removed_ids = existing_ids - seen_ids
+        if removed_ids:
+            placeholders = ",".join("?" for _ in removed_ids)
+            connection.execute(
+                f"DELETE FROM todo_items WHERE id IN ({placeholders})",
+                tuple(removed_ids),
+            )
+        for position, item in enumerate(normalized):
+            if item["id"] is None:
+                connection.execute(
+                    """
+                    INSERT INTO todo_items (entry_id, content, stage, position)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (entry_id, item["content"], item["stage"], position),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE todo_items
+                    SET content = ?, stage = ?, position = ?,
+                        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    WHERE id = ? AND entry_id = ?
+                    """,
+                    (
+                        item["content"],
+                        item["stage"],
+                        position,
+                        item["id"],
+                        entry_id,
+                    ),
+                )
+        connection.execute(
+            """
+            UPDATE entries
+            SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE id = ?
+            """,
+            (entry_id,),
+        )
+        row = connection.execute(
+            """
+            SELECT
+                id, entry_type, content, filename,
+                mime_type, size_bytes, image_position, created_at,
+                updated_at
+            FROM entries
+            WHERE id = ?
+            """,
+            (entry_id,),
+        ).fetchone()
+        self.send_json(
+            HTTPStatus.OK,
+            {"entry": public_entry(row, connection)},
+        )
+
+    def update_todo_stage(self, item_id: int) -> None:
+        payload = self.read_json_body()
+        if payload is None:
+            return
+        stage = payload.get("stage")
+        if (
+            not isinstance(stage, int)
+            or isinstance(stage, bool)
+            or stage < 1
+            or stage > 5
+        ):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "Stage 必须是 1 到 5"},
+            )
+            return
+        with connect_db() as connection:
+            row = connection.execute(
+                """
+                SELECT id, entry_id, content, stage
+                FROM todo_items
+                WHERE id = ?
+                """,
+                (item_id,),
+            ).fetchone()
+            if row is None:
+                self.send_json(
+                    HTTPStatus.NOT_FOUND,
+                    {"error": "这个待办项目不存在"},
+                )
+                return
+            connection.execute(
+                """
+                UPDATE todo_items
+                SET stage = ?,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE id = ?
+                """,
+                (stage, item_id),
+            )
+            item = {
+                "id": row["id"],
+                "content": row["content"],
+                "stage": stage,
+            }
+        self.send_json(
+            HTTPStatus.OK,
+            {"entry_id": row["entry_id"], "item": item},
         )
 
     def create_image_entry(self) -> None:
@@ -703,9 +1049,14 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO entries (
                         content, entry_type, filename, stored_name,
-                        mime_type, size_bytes, sha256, image_position
+                        mime_type, size_bytes, sha256, image_position,
+                        created_at, updated_at
                     )
-                    VALUES (?, 'image', ?, ?, ?, ?, ?, ?)
+                    VALUES (
+                        ?, 'image', ?, ?, ?, ?, ?, ?,
+                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    )
                     """,
                     (
                         content,
@@ -979,9 +1330,13 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO entries (
                         content, entry_type, filename, stored_name,
-                        mime_type, size_bytes
+                        mime_type, size_bytes, created_at, updated_at
                     )
-                    VALUES (?, 'file', ?, ?, ?, ?)
+                    VALUES (
+                        ?, 'file', ?, ?, ?, ?,
+                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    )
                     """,
                     (
                         row["content"],

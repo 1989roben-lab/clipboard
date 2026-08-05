@@ -252,6 +252,27 @@ def main() -> None:
         try:
             migrated = legacy_server.json_call("/api/entries")["entries"]
             assert migrated[0]["updated_at"] == legacy_created_at
+            legacy_text = legacy_server.json_call(
+                "/api/entries",
+                "POST",
+                {"content": "legacy schema new text"},
+                201,
+            )["entry"]
+            legacy_todo = legacy_server.json_call(
+                "/api/entries",
+                "POST",
+                {"type": "todo", "items": ["legacy schema new todo"]},
+                201,
+            )["entry"]
+            assert legacy_text["updated_at"] == legacy_text["created_at"]
+            assert legacy_todo["updated_at"] == legacy_todo["created_at"]
+            legacy_entries = legacy_server.json_call("/api/entries")[
+                "entries"
+            ]
+            assert [entry["id"] for entry in legacy_entries[:2]] == [
+                legacy_todo["id"],
+                legacy_text["id"],
+            ]
         finally:
             legacy_server.stop()
 
@@ -262,12 +283,67 @@ def main() -> None:
             page, page_headers = server.call("/")
             page_text = page.decode("utf-8")
             assert "interactive-widget=resizes-content" in page_text
+            assert "maximum-scale=1" in page_text
             assert "user-scalable=no" not in page_text
             assert 'rel="manifest"' in page_text
             assert 'id="install-button"' in page_text
             assert 'id="force-refresh"' in page_text
             assert '<h1>Memory</h1>' in page_text
             assert 'id="choose-image"' in page_text
+            assert 'id="todo-mode-button"' in page_text
+            assert 'id="todo-modal"' in page_text
+            assert 'data-stage="5"' in page_text
+            assert "display: inline-flex;" in page_text
+            assert "width: fit-content;" in page_text
+            assert "font-size: 13px;" in page_text
+            assert "flex: 0 0 110px;" in page_text
+            assert "min-inline-size: 110px;" in page_text
+            assert "max-inline-size: 110px;" in page_text
+            assert "height: 11px;" in page_text
+            assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in page_text
+            assert "button.textContent = \"\";" in page_text
+            assert "background: #e7f5ec;" in page_text
+            assert "background: #157347;" in page_text
+            assert 'tabindex="-1"' in page_text
+            assert 'todoModal.focus({ preventScroll: true });' in page_text
+            assert 'document.body.style.overflow' not in page_text
+            assert 'todoEditList.querySelector("textarea")?.focus()' not in page_text
+            assert 'id="add-todo-item"' not in page_text
+            assert "todo-edit-remove" not in page_text
+            assert "todo-stage-note" not in page_text
+            assert "todo-complete-label" not in page_text
+            shared_memory_text_css = page_text.split(
+                ".rich-editor,", 1
+            )[1].split("}", 1)[0]
+            for selector in (
+                "pre,",
+                ".entry-editor textarea,",
+                ".todo-item-text,",
+                ".todo-edit-input",
+            ):
+                assert selector in shared_memory_text_css
+            assert '"SFMono-Regular", Consolas' in shared_memory_text_css
+            assert "font-size: 13px;" in shared_memory_text_css
+            assert "font-style: normal;" in shared_memory_text_css
+            assert "font-weight: 400;" in shared_memory_text_css
+            assert "line-height: 1.65;" in shared_memory_text_css
+            assert "letter-spacing: normal;" in shared_memory_text_css
+            assert "white-space: pre-wrap;" in shared_memory_text_css
+            assert "overflow-wrap: anywhere;" in shared_memory_text_css
+            assert ".todo-edit-input { font-size: 16px; }" not in page_text
+            mobile_entry_css = page_text.split(
+                "@media (max-width: 640px)", 1
+            )[1].split("@media (max-width: 360px)", 1)[0]
+            assert "font-size: 16px;" not in mobile_entry_css.split(
+                ".entry-editor textarea {", 1
+            )[1].split("}", 1)[0]
+            todo_edit_function = page_text.split(
+                "function addTodoEditRow", 1
+            )[1].split("function openTodoEditor", 1)[0]
+            assert "createStagePicker" in todo_edit_function
+            assert 'event.key === "Enter"' in todo_edit_function
+            assert 'event.key === "Backspace"' in todo_edit_function
+            assert 'input.addEventListener("paste"' in todo_edit_function
             assert "添加文件" in page_text
             assert 'id="choose-attachment"' not in page_text
             assert 'id="attachment-input"' not in page_text
@@ -275,7 +351,7 @@ def main() -> None:
             assert "Windows" not in page_text
             assert 'id="install-modal"' in page_text
             assert 'loadEntries({ force: true })' in page_text
-            assert 'register("/service-worker.js?v=24"' in page_text
+            assert 'register("/service-worker.js?v=33"' in page_text
             assert "border: none;" in page_text
             assert "backdrop-filter: blur(22px) saturate(180%);" in page_text
             assert "inset 0 1px 0 rgba(255, 255, 255, 0.92)" not in page_text
@@ -288,7 +364,7 @@ def main() -> None:
             assert page_headers.get_content_type() == "text/html"
             assert page_headers["Cache-Control"] == "no-store, max-age=0"
             versioned_page, versioned_page_headers = server.call(
-                "/?app=v24"
+                "/?app=v33"
             )
             assert versioned_page == page
             assert (
@@ -302,7 +378,7 @@ def main() -> None:
             manifest = json.loads(manifest_body)
             assert manifest["display"] == "standalone"
             assert manifest["name"] == "Memory"
-            assert manifest["start_url"] == "/?app=v24"
+            assert manifest["start_url"] == "/?app=v33"
             assert all("?v=14" in icon["src"] for icon in manifest["icons"])
             assert {icon["sizes"] for icon in manifest["icons"]} >= {
                 "192x192",
@@ -321,8 +397,8 @@ def main() -> None:
             worker_text = worker.decode("utf-8")
             assert 'url.pathname.startsWith("/api/")' in worker_text
             assert 'request.mode === "navigate"' in worker_text
-            assert '.catch(() => caches.match("/?app=v24"))' in worker_text
-            assert 'memory-shell-v24' in worker_text
+            assert '.catch(() => caches.match("/?app=v33"))' in worker_text
+            assert 'memory-shell-v33' in worker_text
             assert 'ACTIVATE_UPDATE' in worker_text
             assert worker_headers.get_content_type() == "application/javascript"
             assert worker_headers["Cache-Control"] == "no-cache"
@@ -353,6 +429,7 @@ def main() -> None:
                 )["entry"]
                 assert entry["content"] == caption
                 assert entry["image_position"] == position
+                assert entry["updated_at"] == entry["created_at"]
                 created.append(entry)
                 downloaded, headers = server.call(
                     f"/api/images/{entry['id']}"
@@ -375,6 +452,7 @@ def main() -> None:
             assert attachment["type"] == "file"
             assert attachment["filename"] == "资料.tar"
             assert attachment["size_bytes"] == len(attachment_data)
+            assert attachment["updated_at"] == attachment["created_at"]
             downloaded, headers = server.call(
                 f"/api/files/{attachment['id']}/download"
             )
@@ -384,6 +462,103 @@ def main() -> None:
             assert len(
                 server.json_call("/api/entries")["entries"]
             ) == 5
+
+            todo = server.json_call(
+                "/api/entries",
+                "POST",
+                {
+                    "type": "todo",
+                    "items": ["  准备材料  ", "联系客户", "复盘项目"],
+                },
+                201,
+            )["entry"]
+            assert todo["type"] == "todo"
+            assert todo["content"] == ""
+            assert [item["content"] for item in todo["items"]] == [
+                "准备材料",
+                "联系客户",
+                "复盘项目",
+            ]
+            assert [item["stage"] for item in todo["items"]] == [1, 1, 1]
+            original_todo_updated_at = todo["updated_at"]
+            first_item = todo["items"][0]
+            staged = server.json_call(
+                f"/api/todo-items/{first_item['id']}",
+                "PATCH",
+                {"stage": 5},
+            )
+            assert staged["item"]["stage"] == 5
+            after_stage = server.json_call("/api/entries")["entries"][0]
+            assert after_stage["id"] == todo["id"]
+            assert after_stage["updated_at"] == original_todo_updated_at
+            assert after_stage["items"][0]["stage"] == 5
+            server.json_call(
+                f"/api/todo-items/{first_item['id']}",
+                "PATCH",
+                {"stage": 2},
+            )
+            server.json_call(
+                f"/api/todo-items/{first_item['id']}",
+                "PATCH",
+                {"stage": 0},
+                400,
+            )
+
+            other_todo = server.json_call(
+                "/api/entries",
+                "POST",
+                {"type": "todo", "items": ["其他清单项目"]},
+                201,
+            )["entry"]
+            server.json_call(
+                f"/api/entries/{todo['id']}",
+                "PATCH",
+                {
+                    "items": [
+                        {
+                            "id": other_todo["items"][0]["id"],
+                            "content": "不属于当前清单",
+                            "stage": 1,
+                        }
+                    ]
+                },
+                400,
+            )
+            server.json_call(
+                f"/api/entries/{todo['id']}",
+                "PATCH",
+                {"items": []},
+                400,
+            )
+            time.sleep(0.01)
+            edited_todo = server.json_call(
+                f"/api/entries/{todo['id']}",
+                "PATCH",
+                {
+                    "items": [
+                        {
+                            "id": todo["items"][1]["id"],
+                            "content": "联系重点客户",
+                            "stage": 3,
+                        },
+                        {"content": "新增项目", "stage": 1},
+                    ]
+                },
+            )["entry"]
+            assert edited_todo["updated_at"] > original_todo_updated_at
+            assert [item["content"] for item in edited_todo["items"]] == [
+                "联系重点客户",
+                "新增项目",
+            ]
+            assert [item["stage"] for item in edited_todo["items"]] == [3, 1]
+            server.json_call(f"/api/entries/{todo['id']}", "DELETE")
+            server.json_call(f"/api/entries/{other_todo['id']}", "DELETE")
+            with sqlite3.connect(root / "clipboard.db") as connection:
+                remaining_todo_items = connection.execute(
+                    "SELECT COUNT(*) FROM todo_items"
+                ).fetchone()[0]
+            assert remaining_todo_items == 0
+            assert len(server.json_call("/api/entries")["entries"]) == 5
 
             editable = server.json_call(
                 "/api/entries",
@@ -536,10 +711,20 @@ def main() -> None:
                     "X-Upload-Offset": "0",
                 },
             )
+            server.json_call(
+                "/api/entries",
+                "POST",
+                {"type": "todo", "items": ["随清空操作删除"]},
+                201,
+            )
             cleared = server.json_call("/api/entries", "DELETE")
-            assert cleared["deleted"] == 4
+            assert cleared["deleted"] == 5
             assert cleared["cancelled_uploads"] == 1
             assert not list((root / "uploads").iterdir())
+            with sqlite3.connect(root / "clipboard.db") as connection:
+                assert connection.execute(
+                    "SELECT COUNT(*) FROM todo_items"
+                ).fetchone()[0] == 0
 
             old_image = server.upload(
                 "test.png",
@@ -589,6 +774,29 @@ def main() -> None:
                 f"/api/images/{persisted['id']}"
             )
             assert downloaded == images["test.webp"][1]
+
+            server.json_call("/api/entries", "DELETE")
+            pruned_todo = server.json_call(
+                "/api/entries",
+                "POST",
+                {"type": "todo", "items": ["达到上限后删除"]},
+                201,
+            )["entry"]
+            for index in range(100):
+                server.json_call(
+                    "/api/entries",
+                    "POST",
+                    {"content": f"retention-{index}"},
+                    201,
+                )
+            assert all(
+                entry["id"] != pruned_todo["id"]
+                for entry in server.json_call("/api/entries")["entries"]
+            )
+            with sqlite3.connect(root / "clipboard.db") as connection:
+                assert connection.execute(
+                    "SELECT COUNT(*) FROM todo_items"
+                ).fetchone()[0] == 0
             print(
                 json.dumps(
                     {
