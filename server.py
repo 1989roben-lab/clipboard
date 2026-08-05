@@ -102,6 +102,9 @@ def initialize_database() -> None:
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (
                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                ),
+                updated_at TEXT NOT NULL DEFAULT (
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                 )
             )
             """
@@ -135,6 +138,9 @@ def initialize_database() -> None:
             "image_position": (
                 "ALTER TABLE entries ADD COLUMN image_position INTEGER"
             ),
+            "updated_at": (
+                "ALTER TABLE entries ADD COLUMN updated_at TEXT"
+            ),
         }
         for column, statement in migrations.items():
             if column not in columns:
@@ -148,8 +154,21 @@ def initialize_database() -> None:
         )
         connection.execute(
             """
+            UPDATE entries
+            SET updated_at = created_at
+            WHERE updated_at IS NULL OR updated_at = ''
+            """
+        )
+        connection.execute(
+            """
             CREATE INDEX IF NOT EXISTS entries_created_at_idx
             ON entries(created_at DESC, id DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS entries_updated_at_idx
+            ON entries(updated_at DESC, id DESC)
             """
         )
         connection.execute(
@@ -329,6 +348,7 @@ def public_entry(row: sqlite3.Row) -> dict[str, Any]:
         "size_bytes": row["size_bytes"],
         "image_position": row["image_position"],
         "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
     }
 
 
@@ -392,9 +412,10 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     """
                     SELECT
                         id, entry_type, content, filename,
-                        mime_type, size_bytes, image_position, created_at
+                        mime_type, size_bytes, image_position, created_at,
+                        updated_at
                     FROM entries
-                    ORDER BY id DESC
+                    ORDER BY updated_at DESC, id DESC
                     LIMIT ?
                     """,
                     (MAX_ENTRIES,),
@@ -512,7 +533,8 @@ class ClipboardHandler(BaseHTTPRequestHandler):
             connection.execute(
                 """
                 UPDATE entries
-                SET content = ?, image_position = ?
+                SET content = ?, image_position = ?,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                 WHERE id = ?
                 """,
                 (content, image_position, entry_id),
@@ -521,7 +543,8 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                 """
                 SELECT
                     id, entry_type, content, filename,
-                    mime_type, size_bytes, image_position, created_at
+                    mime_type, size_bytes, image_position, created_at,
+                    updated_at
                 FROM entries
                 WHERE id = ?
                 """,
@@ -568,7 +591,8 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                 """
                 SELECT
                     id, entry_type, content, filename,
-                    mime_type, size_bytes, image_position, created_at
+                    mime_type, size_bytes, image_position, created_at,
+                    updated_at
                 FROM entries
                 WHERE id = ?
                 """,
@@ -699,7 +723,8 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     """
                     SELECT
                         id, entry_type, content, filename,
-                        mime_type, size_bytes, image_position, created_at
+                        mime_type, size_bytes, image_position, created_at,
+                        updated_at
                     FROM entries
                     WHERE id = ?
                     """,
@@ -976,7 +1001,8 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     """
                     SELECT
                         id, entry_type, content, filename,
-                        mime_type, size_bytes, image_position, created_at
+                        mime_type, size_bytes, image_position, created_at,
+                        updated_at
                     FROM entries
                     WHERE id = ?
                     """,

@@ -4,7 +4,7 @@
 
 - 项目名称：Memory
 - GitHub：`https://github.com/1989roben-lab/clipboard`
-- 生产地址：`https://clip.s1242624.org`
+- 生产地址：`https://memory.s1242624.org`
 - 生产端口：`8016`
 - 技术栈：Python 标准库、SQLite、原生 HTML/CSS/JavaScript、Docker Compose
 - 运行依赖：仅 Docker；前端没有构建步骤，Python 没有第三方运行时依赖
@@ -34,6 +34,7 @@ Memory 是部署在私人服务器上的个人记忆库，用于保存文字、�
 - 图片和附件说明最大 12 KB。
 - 文字、图片和附件合计最多保留 100 条；超出后自动删除最旧记录及关联文件。
 - 支持文字、图片说明和附件说明的卡片内编辑。
+- “我的记忆”按最后编辑时间倒序排列，刚编辑的记录会移到最前。
 - 支持粘贴图片、拖入文件、文件选择和移动端快速拍照。
 - “添加文件”会自动识别：支持的图片进入预览/压缩流程，其他文件进入附件流程。
 - “清空全部”会永久删除记录、上传文件和未完成上传。
@@ -80,7 +81,7 @@ Service Worker 只缓存 HTML、manifest 和应用图标，不缓存 `/api/`、`
 3. `static/index.html` 注册 Service Worker 的查询参数。
 4. `static/manifest.webmanifest` 的 `start_url` 和图标查询参数。
 
-当前应用外壳版本为 `v18`，图标资源查询参数为 `v14`。Chrome、macOS Dock
+当前应用外壳版本为 `v24`，图标资源查询参数为 `v14`。Chrome、macOS Dock
 和已安装的 PWA 可能长期保留旧图标。
 即使服务端图标已经更新，已安装应用也不一定立即刷新。排查时先确认公网 manifest
 和图标返回最新内容；仍显示旧图时，应删除旧应用，在 Chrome 的
@@ -144,6 +145,6 @@ Cloudflare、GitHub 或服务器授权信息只保存在服务器的私有配置
 
 - 生产容器：健康。
 - 公网域名：可访问。
-- PWA 缓存版本：`v18`。
+- PWA 缓存版本：`v24`。
 - 图标：蓝紫色半透明记忆薄片，新图标已用于 iOS、PWA 和 maskable 尺寸。
 - 最近一次图标发布前后记录数量一致，持久化数据未受影响。

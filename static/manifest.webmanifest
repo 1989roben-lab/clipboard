@@ -4,7 +4,7 @@
   "short_name": "Memory",
   "description": "随时随地保存记忆、想法、图片与文件。",
   "lang": "zh-CN",
-  "start_url": "/?app=v18",
+  "start_url": "/?app=v24",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],

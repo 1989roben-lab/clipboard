@@ -8,6 +8,7 @@ import http.client
 import json
 import os
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -229,6 +230,31 @@ def main() -> None:
         prefix="lan-clipboard-images-"
     ) as temporary_directory:
         root = Path(temporary_directory)
+        legacy_root = root / "legacy"
+        legacy_root.mkdir()
+        legacy_created_at = "2025-01-02T03:04:05.000Z"
+        with sqlite3.connect(legacy_root / "clipboard.db") as connection:
+            connection.execute(
+                """
+                CREATE TABLE entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO entries (content, created_at) VALUES (?, ?)",
+                ("legacy entry", legacy_created_at),
+            )
+        legacy_server = TestServer(legacy_root)
+        legacy_server.start()
+        try:
+            migrated = legacy_server.json_call("/api/entries")["entries"]
+            assert migrated[0]["updated_at"] == legacy_created_at
+        finally:
+            legacy_server.stop()
+
         server = TestServer(root)
         images = decoded_images()
         server.start()
@@ -249,7 +275,7 @@ def main() -> None:
             assert "Windows" not in page_text
             assert 'id="install-modal"' in page_text
             assert 'loadEntries({ force: true })' in page_text
-            assert 'register("/service-worker.js?v=18"' in page_text
+            assert 'register("/service-worker.js?v=24"' in page_text
             assert "border: none;" in page_text
             assert "backdrop-filter: blur(22px) saturate(180%);" in page_text
             assert "inset 0 1px 0 rgba(255, 255, 255, 0.92)" not in page_text
@@ -262,7 +288,7 @@ def main() -> None:
             assert page_headers.get_content_type() == "text/html"
             assert page_headers["Cache-Control"] == "no-store, max-age=0"
             versioned_page, versioned_page_headers = server.call(
-                "/?app=v18"
+                "/?app=v24"
             )
             assert versioned_page == page
             assert (
@@ -276,7 +302,7 @@ def main() -> None:
             manifest = json.loads(manifest_body)
             assert manifest["display"] == "standalone"
             assert manifest["name"] == "Memory"
-            assert manifest["start_url"] == "/?app=v18"
+            assert manifest["start_url"] == "/?app=v24"
             assert all("?v=14" in icon["src"] for icon in manifest["icons"])
             assert {icon["sizes"] for icon in manifest["icons"]} >= {
                 "192x192",
@@ -295,8 +321,8 @@ def main() -> None:
             worker_text = worker.decode("utf-8")
             assert 'url.pathname.startsWith("/api/")' in worker_text
             assert 'request.mode === "navigate"' in worker_text
-            assert '.catch(() => caches.match("/?app=v18"))' in worker_text
-            assert 'memory-shell-v18' in worker_text
+            assert '.catch(() => caches.match("/?app=v24"))' in worker_text
+            assert 'memory-shell-v24' in worker_text
             assert 'ACTIVATE_UPDATE' in worker_text
             assert worker_headers.get_content_type() == "application/javascript"
             assert worker_headers["Cache-Control"] == "no-cache"
@@ -365,6 +391,7 @@ def main() -> None:
                 {"content": "修改前"},
                 201,
             )["entry"]
+            time.sleep(0.01)
             updated = server.json_call(
                 f"/api/entries/{editable['id']}",
                 "PATCH",
@@ -372,6 +399,7 @@ def main() -> None:
             )["entry"]
             assert updated["content"] == "修改后\n第二行"
             assert updated["created_at"] == editable["created_at"]
+            assert updated["updated_at"] > editable["updated_at"]
             assert server.json_call(
                 "/api/entries"
             )["entries"][0]["content"] == "修改后\n第二行"
@@ -382,6 +410,7 @@ def main() -> None:
                 400,
             )
             assert "请输入" in empty_update["error"]
+            time.sleep(0.01)
             image_update = server.json_call(
                 f"/api/entries/{created[0]['id']}",
                 "PATCH",
@@ -389,6 +418,9 @@ def main() -> None:
             )["entry"]
             assert image_update["content"] == "图片说明已修改"
             assert image_update["image_position"] == 2
+            assert server.json_call(
+                "/api/entries"
+            )["entries"][0]["id"] == image_update["id"]
             file_update = server.json_call(
                 f"/api/entries/{attachment['id']}",
                 "PATCH",

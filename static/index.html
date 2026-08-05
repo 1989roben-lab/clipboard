@@ -1119,7 +1119,7 @@
         width: 100%;
         max-width: none;
         margin: 0;
-        padding: 36px clamp(16px, 2.2vw, 32px) 82px;
+        padding: 36px clamp(17px, calc(2.2vw + 1px), 33px) 82px;
       }
 
       header {
@@ -1146,7 +1146,7 @@
         max-width: 600px;
         margin-top: 14px;
         color: rgba(40, 42, 48, 0.68);
-        font-size: 16px;
+        font-size: 14px;
         line-height: 1.6;
       }
 
@@ -1203,7 +1203,7 @@
       }
 
       .rich-editor {
-        min-height: 238px;
+        min-height: 160px;
         padding: 17px;
         border: 1px solid rgba(255, 255, 255, 0.84);
         border-radius: 22px;
@@ -1242,6 +1242,16 @@
       .icon-button:hover,
       .secondary-link:hover {
         background: rgba(255, 255, 255, 0.78);
+      }
+
+      .composer-footer .choose-image,
+      .composer-footer .primary {
+        min-height: 36px;
+        padding: 7px 13px;
+      }
+
+      .composer-footer .primary {
+        min-width: 116px;
       }
 
       .primary {
@@ -1347,8 +1357,8 @@
           max-width: none;
           margin: 0;
           padding-top: max(18px, env(safe-area-inset-top));
-          padding-right: max(8px, env(safe-area-inset-right));
-          padding-left: max(8px, env(safe-area-inset-left));
+          padding-right: max(9px, calc(1px + env(safe-area-inset-right)));
+          padding-left: max(9px, calc(1px + env(safe-area-inset-left)));
         }
 
         h1 {
@@ -1371,11 +1381,12 @@
         }
 
         .choose-image {
+          min-height: 38px;
           border-radius: 999px;
         }
 
         .primary {
-          min-height: 52px;
+          min-height: 40px;
         }
 
         .entry {
@@ -1847,6 +1858,7 @@
           return (
             entry.id === next.id &&
             entry.created_at === next.created_at &&
+            entry.updated_at === next.updated_at &&
             entry.type === next.type &&
             entry.content === next.content &&
             entry.filename === next.filename &&
@@ -1941,9 +1953,10 @@
               method: "PATCH",
               body: JSON.stringify({ content: textarea.value }),
             });
-            entries = entries.map((item) =>
-              item.id === entry.id ? data.entry : item,
-            );
+            entries = [
+              data.entry,
+              ...entries.filter((item) => item.id !== entry.id),
+            ];
             renderEntries({ preserveScroll: true });
             showToast("修改已保存");
           } catch (error) {
@@ -2024,8 +2037,8 @@
                 : "文字";
 
           const time = document.createElement("time");
-          time.dateTime = entry.created_at;
-          time.textContent = formatTime(entry.created_at);
+          time.dateTime = entry.updated_at;
+          time.textContent = formatTime(entry.updated_at);
           metaLeft.append(badge, time);
 
           const actions = document.createElement("div");
@@ -3213,7 +3226,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=18", {
+            .register("/service-worker.js?v=24", {
               updateViaCache: "none",
             })
             .then(async (registration) => {
