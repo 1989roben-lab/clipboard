@@ -252,6 +252,16 @@ def main() -> None:
         try:
             migrated = legacy_server.json_call("/api/entries")["entries"]
             assert migrated[0]["updated_at"] == legacy_created_at
+            assert migrated[0]["pinned"] is False
+            with sqlite3.connect(
+                legacy_root / "clipboard.db"
+            ) as connection:
+                assert "pinned_at" in {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(entries)"
+                    ).fetchall()
+                }
             legacy_text = legacy_server.json_call(
                 "/api/entries",
                 "POST",
@@ -308,6 +318,13 @@ def main() -> None:
             assert 'todoModal.focus({ preventScroll: true });' in page_text
             assert 'document.body.style.overflow' not in page_text
             assert 'todoEditList.querySelector("textarea")?.focus()' not in page_text
+            assert "function createPinButton(entry)" in page_text
+            assert 'entry.pinned ? "取消置顶" : "置顶"' in page_text
+            assert "entry.pinned === next.pinned" in page_text
+            assert "JSON.stringify({ pinned })" in page_text
+            assert page_text.count("pin, remove") == 4
+            assert 'copy.textContent = "复制";' in page_text
+            assert 'view.textContent = "查看原图";' not in page_text
             assert 'id="add-todo-item"' not in page_text
             assert "todo-edit-remove" not in page_text
             assert "todo-stage-note" not in page_text
@@ -351,7 +368,7 @@ def main() -> None:
             assert "Windows" not in page_text
             assert 'id="install-modal"' in page_text
             assert 'loadEntries({ force: true })' in page_text
-            assert 'register("/service-worker.js?v=33"' in page_text
+            assert 'register("/service-worker.js?v=35"' in page_text
             assert "border: none;" in page_text
             assert "backdrop-filter: blur(22px) saturate(180%);" in page_text
             assert "inset 0 1px 0 rgba(255, 255, 255, 0.92)" not in page_text
@@ -364,7 +381,7 @@ def main() -> None:
             assert page_headers.get_content_type() == "text/html"
             assert page_headers["Cache-Control"] == "no-store, max-age=0"
             versioned_page, versioned_page_headers = server.call(
-                "/?app=v33"
+                "/?app=v35"
             )
             assert versioned_page == page
             assert (
@@ -378,7 +395,7 @@ def main() -> None:
             manifest = json.loads(manifest_body)
             assert manifest["display"] == "standalone"
             assert manifest["name"] == "Memory"
-            assert manifest["start_url"] == "/?app=v33"
+            assert manifest["start_url"] == "/?app=v35"
             assert all("?v=14" in icon["src"] for icon in manifest["icons"])
             assert {icon["sizes"] for icon in manifest["icons"]} >= {
                 "192x192",
@@ -397,8 +414,8 @@ def main() -> None:
             worker_text = worker.decode("utf-8")
             assert 'url.pathname.startsWith("/api/")' in worker_text
             assert 'request.mode === "navigate"' in worker_text
-            assert '.catch(() => caches.match("/?app=v33"))' in worker_text
-            assert 'memory-shell-v33' in worker_text
+            assert '.catch(() => caches.match("/?app=v35"))' in worker_text
+            assert 'memory-shell-v35' in worker_text
             assert 'ACTIVATE_UPDATE' in worker_text
             assert worker_headers.get_content_type() == "application/javascript"
             assert worker_headers["Cache-Control"] == "no-cache"
@@ -551,6 +568,111 @@ def main() -> None:
                 "新增项目",
             ]
             assert [item["stage"] for item in edited_todo["items"]] == [3, 1]
+
+            pin_text = server.json_call(
+                "/api/entries",
+                "POST",
+                {"content": "置顶接口测试"},
+                201,
+            )["entry"]
+            pin_targets = [created[0], attachment, edited_todo, pin_text]
+            for target in pin_targets:
+                original_updated_at = target["updated_at"]
+                time.sleep(0.01)
+                pinned_entry = server.json_call(
+                    f"/api/entries/{target['id']}",
+                    "PATCH",
+                    {"pinned": True},
+                )["entry"]
+                assert pinned_entry["pinned"] is True
+                assert pinned_entry["updated_at"] == original_updated_at
+            pinned_entries = server.json_call("/api/entries")["entries"]
+            assert [entry["id"] for entry in pinned_entries[:4]] == [
+                target["id"] for target in reversed(pin_targets)
+            ]
+            server.json_call(
+                f"/api/todo-items/{edited_todo['items'][0]['id']}",
+                "PATCH",
+                {"stage": 4},
+            )
+            after_pinned_stage = server.json_call("/api/entries")["entries"]
+            assert [entry["id"] for entry in after_pinned_stage[:4]] == [
+                target["id"] for target in reversed(pin_targets)
+            ]
+            pinned_todo = next(
+                entry
+                for entry in after_pinned_stage
+                if entry["id"] == edited_todo["id"]
+            )
+            assert pinned_todo["updated_at"] == edited_todo["updated_at"]
+            assert pinned_todo["items"][0]["stage"] == 4
+
+            with sqlite3.connect(root / "clipboard.db") as connection:
+                pin_text_pinned_at = connection.execute(
+                    "SELECT pinned_at FROM entries WHERE id = ?",
+                    (pin_text["id"],),
+                ).fetchone()[0]
+                oldest_pin_time = connection.execute(
+                    "SELECT pinned_at FROM entries WHERE id = ?",
+                    (created[0]["id"],),
+                ).fetchone()[0]
+            idempotent_pin = server.json_call(
+                f"/api/entries/{pin_text['id']}",
+                "PATCH",
+                {"pinned": True},
+            )["entry"]
+            assert idempotent_pin["updated_at"] == pin_text["updated_at"]
+            with sqlite3.connect(root / "clipboard.db") as connection:
+                assert connection.execute(
+                    "SELECT pinned_at FROM entries WHERE id = ?",
+                    (pin_text["id"],),
+                ).fetchone()[0] == pin_text_pinned_at
+
+            time.sleep(0.01)
+            edited_pinned = server.json_call(
+                f"/api/entries/{created[0]['id']}",
+                "PATCH",
+                {"content": "置顶图片编辑测试"},
+            )["entry"]
+            assert edited_pinned["pinned"] is True
+            assert edited_pinned["updated_at"] > created[0]["updated_at"]
+            with sqlite3.connect(root / "clipboard.db") as connection:
+                assert connection.execute(
+                    "SELECT pinned_at FROM entries WHERE id = ?",
+                    (created[0]["id"],),
+                ).fetchone()[0] == oldest_pin_time
+            assert [
+                entry["id"]
+                for entry in server.json_call("/api/entries")["entries"][:4]
+            ] == [target["id"] for target in reversed(pin_targets)]
+
+            server.json_call(
+                f"/api/entries/{pin_text['id']}",
+                "PATCH",
+                {"pinned": "yes"},
+                400,
+            )
+            server.json_call(
+                f"/api/entries/{pin_text['id']}",
+                "PATCH",
+                {"pinned": False, "content": "禁止混合提交"},
+                400,
+            )
+            server.json_call(
+                "/api/entries/999999999",
+                "PATCH",
+                {"pinned": True},
+                404,
+            )
+
+            for target in pin_targets:
+                unpinned_entry = server.json_call(
+                    f"/api/entries/{target['id']}",
+                    "PATCH",
+                    {"pinned": False},
+                )["entry"]
+                assert unpinned_entry["pinned"] is False
+            server.json_call(f"/api/entries/{pin_text['id']}", "DELETE")
             server.json_call(f"/api/entries/{todo['id']}", "DELETE")
             server.json_call(f"/api/entries/{other_todo['id']}", "DELETE")
             with sqlite3.connect(root / "clipboard.db") as connection:
@@ -765,11 +887,17 @@ def main() -> None:
                 "image/webp",
                 images["test.webp"][1],
             )["entry"]
+            server.json_call(
+                f"/api/entries/{persisted['id']}",
+                "PATCH",
+                {"pinned": True},
+            )
             server.stop()
             server.start()
             entries = server.json_call("/api/entries")["entries"]
             assert len(entries) == 1
             assert entries[0]["id"] == persisted["id"]
+            assert entries[0]["pinned"] is True
             downloaded, _ = server.call(
                 f"/api/images/{persisted['id']}"
             )
@@ -782,6 +910,11 @@ def main() -> None:
                 {"type": "todo", "items": ["达到上限后删除"]},
                 201,
             )["entry"]
+            server.json_call(
+                f"/api/entries/{pruned_todo['id']}",
+                "PATCH",
+                {"pinned": True},
+            )
             for index in range(100):
                 server.json_call(
                     "/api/entries",
@@ -789,9 +922,43 @@ def main() -> None:
                     {"content": f"retention-{index}"},
                     201,
                 )
+            retained_entries = server.json_call("/api/entries")["entries"]
+            assert len(retained_entries) == 100
+            assert retained_entries[0]["id"] == pruned_todo["id"]
+            assert retained_entries[0]["pinned"] is True
+            with sqlite3.connect(root / "clipboard.db") as connection:
+                assert connection.execute(
+                    "SELECT COUNT(*) FROM todo_items"
+                ).fetchone()[0] == 1
+                entry_ids = [
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT id FROM entries ORDER BY id"
+                    ).fetchall()
+                ]
+                connection.executemany(
+                    "UPDATE entries SET pinned_at = ? WHERE id = ?",
+                    [
+                        (f"2026-01-01T00:00:00.{index:03d}Z", entry_id)
+                        for index, entry_id in enumerate(entry_ids)
+                    ],
+                )
+            oldest_pinned_id = entry_ids[0]
+            newcomer = server.json_call(
+                "/api/entries",
+                "POST",
+                {"content": "全部置顶时仍可新增"},
+                201,
+            )["entry"]
+            after_all_pinned = server.json_call("/api/entries")["entries"]
+            assert len(after_all_pinned) == 100
+            assert any(
+                entry["id"] == newcomer["id"]
+                for entry in after_all_pinned
+            )
             assert all(
-                entry["id"] != pruned_todo["id"]
-                for entry in server.json_call("/api/entries")["entries"]
+                entry["id"] != oldest_pinned_id
+                for entry in after_all_pinned
             )
             with sqlite3.connect(root / "clipboard.db") as connection:
                 assert connection.execute(

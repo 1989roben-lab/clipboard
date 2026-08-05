@@ -2200,6 +2200,7 @@
             entry.id === next.id &&
             entry.created_at === next.created_at &&
             entry.updated_at === next.updated_at &&
+            entry.pinned === next.pinned &&
             entry.type === next.type &&
             entry.content === next.content &&
             entry.filename === next.filename &&
@@ -2387,6 +2388,37 @@
           buttons.forEach((button) => { button.disabled = false; });
           showToast(error.message, true);
         }
+      }
+
+      function createPinButton(entry) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = entry.pinned ? "取消置顶" : "置顶";
+        button.setAttribute(
+          "aria-label",
+          entry.pinned ? "取消置顶这条记忆" : "置顶这条记忆",
+        );
+        button.addEventListener("click", async () => {
+          const pinned = !entry.pinned;
+          button.disabled = true;
+          try {
+            const data = await api(`/api/entries/${entry.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ pinned }),
+            });
+            entries = entries.map((candidate) =>
+              candidate.id === entry.id ? data.entry : candidate,
+            );
+            const refreshed = await loadEntries({ silent: true, force: true });
+            if (!refreshed) renderEntries({ preserveScroll: true });
+            showToast(pinned ? "记忆已置顶" : "已取消置顶");
+          } catch (error) {
+            button.disabled = false;
+            showToast(error.message, true);
+          }
+        });
+        return button;
       }
 
       function addTodoEditRow(
@@ -2629,6 +2661,8 @@
           );
           remove.addEventListener("click", () => deleteEntry(entry.id));
 
+          const pin = createPinButton(entry);
+
           if (entry.type === "image") {
             const edit = document.createElement("button");
             edit.type = "button";
@@ -2639,11 +2673,11 @@
               const copy = document.createElement("button");
               copy.type = "button";
               copy.className = "secondary";
-              copy.textContent = "复制文字";
+              copy.textContent = "复制";
               copy.addEventListener("click", async () => {
                 try {
                   await copyText(entry.content);
-                  showToast("已复制附带文字");
+                  showToast("已复制");
                 } catch (error) {
                   showToast(`复制失败：${error.message}`, true);
                 }
@@ -2651,19 +2685,12 @@
               actions.append(copy);
             }
 
-            const view = document.createElement("a");
-            view.className = "secondary-link";
-            view.href = `/api/images/${entry.id}`;
-            view.target = "_blank";
-            view.rel = "noopener";
-            view.textContent = "查看原图";
-
             const download = document.createElement("a");
             download.className = "secondary-link";
             download.href = `/api/images/${entry.id}/download`;
             download.textContent = "下载";
 
-            actions.append(view, download, remove);
+            actions.append(download, pin, remove);
             meta.append(metaLeft, actions);
 
             const imageContent = document.createElement("div");
@@ -2758,7 +2785,7 @@
             download.className = "secondary-link";
             download.href = `/api/files/${entry.id}/download`;
             download.textContent = "下载";
-            actions.append(download, remove);
+            actions.append(download, pin, remove);
             meta.append(metaLeft, actions);
 
             const attachmentContent = document.createElement("div");
@@ -2795,7 +2822,7 @@
             edit.className = "secondary";
             edit.textContent = "编辑";
             edit.addEventListener("click", () => openTodoEditor(entry, edit));
-            actions.append(edit, remove);
+            actions.append(edit, pin, remove);
             meta.append(metaLeft, actions);
 
             const todoContent = document.createElement("div");
@@ -2846,7 +2873,7 @@
               startEntryEdit(entry, content, edit),
             );
 
-            actions.append(edit, copy, remove);
+            actions.append(edit, copy, pin, remove);
             meta.append(metaLeft, actions);
             article.append(meta, content);
           }
@@ -3862,7 +3889,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=33", {
+            .register("/service-worker.js?v=35", {
               updateViaCache: "none",
             })
             .then(async (registration) => {

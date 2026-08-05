@@ -143,6 +143,9 @@ def initialize_database() -> None:
             "updated_at": (
                 "ALTER TABLE entries ADD COLUMN updated_at TEXT"
             ),
+            "pinned_at": (
+                "ALTER TABLE entries ADD COLUMN pinned_at TEXT"
+            ),
         }
         for column, statement in migrations.items():
             if column not in columns:
@@ -171,6 +174,12 @@ def initialize_database() -> None:
             """
             CREATE INDEX IF NOT EXISTS entries_updated_at_idx
             ON entries(updated_at DESC, id DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS entries_pinned_at_idx
+            ON entries(pinned_at DESC, updated_at DESC, id DESC)
             """
         )
         connection.execute(
@@ -299,15 +308,29 @@ def expire_file_uploads() -> None:
     unlink_uploads([row["stored_name"] for row in rows])
 
 
-def prune_entries(connection: sqlite3.Connection) -> list[str]:
+def prune_entries(
+    connection: sqlite3.Connection,
+    protected_id: int,
+) -> list[str]:
+    count = connection.execute(
+        "SELECT COUNT(*) FROM entries"
+    ).fetchone()[0]
+    overflow = max(count - MAX_ENTRIES, 0)
+    if not overflow:
+        return []
     rows = connection.execute(
         """
         SELECT id, stored_name
         FROM entries
-        ORDER BY id DESC
-        LIMIT -1 OFFSET ?
+        WHERE id != ?
+        ORDER BY
+            (pinned_at IS NOT NULL) ASC,
+            CASE WHEN pinned_at IS NULL THEN updated_at END ASC,
+            CASE WHEN pinned_at IS NOT NULL THEN pinned_at END ASC,
+            id ASC
+        LIMIT ?
         """,
-        (MAX_ENTRIES,),
+        (protected_id, overflow),
     ).fetchall()
     if not rows:
         return []
@@ -380,6 +403,7 @@ def public_entry(
         "image_position": row["image_position"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "pinned": row["pinned_at"] is not None,
     }
     if row["entry_type"] == "todo":
         if connection is None:
@@ -465,9 +489,13 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     SELECT
                         id, entry_type, content, filename,
                         mime_type, size_bytes, image_position, created_at,
-                        updated_at
+                        updated_at, pinned_at
                     FROM entries
-                    ORDER BY updated_at DESC, id DESC
+                    ORDER BY
+                        (pinned_at IS NOT NULL) DESC,
+                        pinned_at DESC,
+                        updated_at DESC,
+                        id DESC
                     LIMIT ?
                     """,
                     (MAX_ENTRIES,),
@@ -541,7 +569,7 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         with connect_db() as connection:
             existing = connection.execute(
                 """
-                SELECT entry_type, image_position
+                SELECT entry_type, image_position, pinned_at
                 FROM entries
                 WHERE id = ?
                 """,
@@ -554,6 +582,52 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                 )
                 return
             entry_type = existing["entry_type"]
+            if "pinned" in payload:
+                if set(payload) != {"pinned"}:
+                    self.send_json(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": "置顶状态必须单独提交"},
+                    )
+                    return
+                pinned = payload["pinned"]
+                if not isinstance(pinned, bool):
+                    self.send_json(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": "置顶状态必须是布尔值"},
+                    )
+                    return
+                if pinned and existing["pinned_at"] is None:
+                    connection.execute(
+                        """
+                        UPDATE entries
+                        SET pinned_at = strftime(
+                            '%Y-%m-%dT%H:%M:%fZ', 'now'
+                        )
+                        WHERE id = ?
+                        """,
+                        (entry_id,),
+                    )
+                elif not pinned and existing["pinned_at"] is not None:
+                    connection.execute(
+                        "UPDATE entries SET pinned_at = NULL WHERE id = ?",
+                        (entry_id,),
+                    )
+                row = connection.execute(
+                    """
+                    SELECT
+                        id, entry_type, content, filename,
+                        mime_type, size_bytes, image_position, created_at,
+                        updated_at, pinned_at
+                    FROM entries
+                    WHERE id = ?
+                    """,
+                    (entry_id,),
+                ).fetchone()
+                self.send_json(
+                    HTTPStatus.OK,
+                    {"entry": public_entry(row, connection)},
+                )
+                return
             if entry_type == "todo":
                 self.update_todo_entry(connection, entry_id, payload)
                 return
@@ -608,7 +682,7 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                 SELECT
                     id, entry_type, content, filename,
                     mime_type, size_bytes, image_position, created_at,
-                    updated_at
+                    updated_at, pinned_at
                 FROM entries
                 WHERE id = ?
                 """,
@@ -670,13 +744,13 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                 (content,),
             )
             entry_id = cursor.lastrowid
-            expired_uploads = prune_entries(connection)
+            expired_uploads = prune_entries(connection, entry_id)
             row = connection.execute(
                 """
                 SELECT
                     id, entry_type, content, filename,
                     mime_type, size_bytes, image_position, created_at,
-                    updated_at
+                    updated_at, pinned_at
                 FROM entries
                 WHERE id = ?
                 """,
@@ -744,13 +818,13 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     for position, content in enumerate(items)
                 ],
             )
-            expired_uploads = prune_entries(connection)
+            expired_uploads = prune_entries(connection, entry_id)
             row = connection.execute(
                 """
                 SELECT
                     id, entry_type, content, filename,
                     mime_type, size_bytes, image_position, created_at,
-                    updated_at
+                    updated_at, pinned_at
                 FROM entries
                 WHERE id = ?
                 """,
@@ -889,7 +963,7 @@ class ClipboardHandler(BaseHTTPRequestHandler):
             SELECT
                 id, entry_type, content, filename,
                 mime_type, size_bytes, image_position, created_at,
-                updated_at
+                updated_at, pinned_at
             FROM entries
             WHERE id = ?
             """,
@@ -1069,13 +1143,13 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     ),
                 )
                 entry_id = cursor.lastrowid
-                expired_uploads = prune_entries(connection)
+                expired_uploads = prune_entries(connection, entry_id)
                 row = connection.execute(
                     """
                     SELECT
                         id, entry_type, content, filename,
                         mime_type, size_bytes, image_position, created_at,
-                        updated_at
+                        updated_at, pinned_at
                     FROM entries
                     WHERE id = ?
                     """,
@@ -1351,13 +1425,13 @@ class ClipboardHandler(BaseHTTPRequestHandler):
                     "DELETE FROM file_uploads WHERE upload_id = ?",
                     (upload_id,),
                 )
-                expired_uploads = prune_entries(connection)
+                expired_uploads = prune_entries(connection, entry_id)
                 entry = connection.execute(
                     """
                     SELECT
                         id, entry_type, content, filename,
                         mime_type, size_bytes, image_position, created_at,
-                        updated_at
+                        updated_at, pinned_at
                     FROM entries
                     WHERE id = ?
                     """,
