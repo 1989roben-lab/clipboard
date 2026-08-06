@@ -325,6 +325,19 @@ def main() -> None:
             assert page_text.count("pin, remove") == 4
             assert 'copy.textContent = "复制";' in page_text
             assert 'view.textContent = "查看原图";' not in page_text
+            assert "grid-template-columns: 22px minmax(0, 1fr) 110px;" in page_text
+            assert "function createTodoDragHandle(row)" in page_text
+            assert "touch-action: none;" in page_text
+            assert 'handle.addEventListener("pointerdown"' in page_text
+            assert 'handle.addEventListener("pointermove"' in page_text
+            assert 'event.key !== "ArrowUp"' in page_text
+            assert "runTodoDragAutoScroll" in page_text
+            assert "row.append(dragHandle, input, picker);" in page_text
+            assert 'id="todo-drag-status"' in page_text
+            assert "const ghost = row.cloneNode(true);" in page_text
+            assert 'ghost.classList.add("todo-drag-ghost")' in page_text
+            assert "updateTodoDropTarget(row, event.clientY);" in page_text
+            assert "state.ghost?.remove();" in page_text
             assert 'id="add-todo-item"' not in page_text
             assert "todo-edit-remove" not in page_text
             assert "todo-stage-note" not in page_text
@@ -368,7 +381,7 @@ def main() -> None:
             assert "Windows" not in page_text
             assert 'id="install-modal"' in page_text
             assert 'loadEntries({ force: true })' in page_text
-            assert 'register("/service-worker.js?v=35"' in page_text
+            assert 'register("/service-worker.js?v=37"' in page_text
             assert "border: none;" in page_text
             assert "backdrop-filter: blur(22px) saturate(180%);" in page_text
             assert "inset 0 1px 0 rgba(255, 255, 255, 0.92)" not in page_text
@@ -381,7 +394,7 @@ def main() -> None:
             assert page_headers.get_content_type() == "text/html"
             assert page_headers["Cache-Control"] == "no-store, max-age=0"
             versioned_page, versioned_page_headers = server.call(
-                "/?app=v35"
+                "/?app=v37"
             )
             assert versioned_page == page
             assert (
@@ -395,7 +408,7 @@ def main() -> None:
             manifest = json.loads(manifest_body)
             assert manifest["display"] == "standalone"
             assert manifest["name"] == "Memory"
-            assert manifest["start_url"] == "/?app=v35"
+            assert manifest["start_url"] == "/?app=v37"
             assert all("?v=14" in icon["src"] for icon in manifest["icons"])
             assert {icon["sizes"] for icon in manifest["icons"]} >= {
                 "192x192",
@@ -414,8 +427,8 @@ def main() -> None:
             worker_text = worker.decode("utf-8")
             assert 'url.pathname.startsWith("/api/")' in worker_text
             assert 'request.mode === "navigate"' in worker_text
-            assert '.catch(() => caches.match("/?app=v35"))' in worker_text
-            assert 'memory-shell-v35' in worker_text
+            assert '.catch(() => caches.match("/?app=v37"))' in worker_text
+            assert 'memory-shell-v37' in worker_text
             assert 'ACTIVATE_UPDATE' in worker_text
             assert worker_headers.get_content_type() == "application/javascript"
             assert worker_headers["Cache-Control"] == "no-cache"

@@ -1551,14 +1551,102 @@
 
       .todo-edit-item {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 110px;
+        position: relative;
+        grid-template-columns: 22px minmax(0, 1fr) 110px;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         padding: 7px 6px;
+        transition:
+          background 120ms ease,
+          box-shadow 120ms ease,
+          transform 120ms ease;
       }
 
       .todo-edit-item + .todo-edit-item {
         border-top: 1px solid rgba(121, 151, 132, 0.14);
+      }
+
+      .todo-edit-list.is-dragging {
+        cursor: grabbing;
+        user-select: none;
+      }
+
+      .todo-edit-item.is-dragging {
+        opacity: 0.24;
+      }
+
+      .todo-edit-item.todo-drag-ghost {
+        position: fixed;
+        z-index: 60;
+        border: 1px solid rgba(121, 151, 132, 0.28);
+        border-radius: 10px;
+        background: rgba(245, 251, 247, 0.98);
+        box-shadow: 0 8px 22px rgba(53, 91, 68, 0.2);
+        pointer-events: none;
+        transition: none;
+      }
+
+      .todo-edit-item.todo-drop-before::before {
+        content: "";
+        position: absolute;
+        z-index: 3;
+        top: -2px;
+        right: 6px;
+        left: 6px;
+        height: 3px;
+        border-radius: 999px;
+        background: #0d99ff;
+        box-shadow: 0 0 0 2px rgba(13, 153, 255, 0.12);
+      }
+
+      .todo-edit-list.todo-drop-at-end {
+        box-shadow:
+          inset 0 -3px #0d99ff,
+          0 0 0 4px rgba(0, 122, 255, 0.1);
+      }
+
+      .todo-drag-handle {
+        display: grid;
+        width: 22px;
+        min-width: 22px;
+        height: 34px;
+        min-height: 34px;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: #6b7d74;
+        cursor: grab;
+        font-family: system-ui, sans-serif;
+        font-size: 18px;
+        line-height: 1;
+        touch-action: none;
+      }
+
+      .todo-drag-handle:active { cursor: grabbing; }
+
+      .todo-drag-handle:focus-visible {
+        outline: 3px solid rgba(0, 122, 255, 0.32);
+        outline-offset: 1px;
+      }
+
+      .todo-drag-handle:disabled {
+        cursor: default;
+        opacity: 0.25;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        overflow: hidden;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        border: 0;
+        margin: -1px;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
       }
 
       .todo-edit-input {
@@ -1631,8 +1719,8 @@
           gap: 6px;
         }
         .todo-edit-item {
-          grid-template-columns: minmax(0, 1fr) 110px;
-          gap: 6px;
+          grid-template-columns: 22px minmax(0, 1fr) 110px;
+          gap: 4px;
         }
         #quick-camera,
         .todo-mode-button { grid-column: auto; }
@@ -1798,9 +1886,14 @@
       <div class="todo-panel">
         <h2 id="todo-dialog-title">编辑待办事项</h2>
         <p class="todo-dialog-help">
-          每行一个项目；按回车新增，右侧色块可调整 Stage。
+          每行一个项目；拖动左侧手柄排序，按回车新增，右侧调整 Stage。
         </p>
         <div class="todo-edit-list" id="todo-edit-list"></div>
+        <p
+          class="visually-hidden"
+          id="todo-drag-status"
+          aria-live="polite"
+        ></p>
         <p class="todo-dialog-error" id="todo-dialog-error" aria-live="polite"></p>
         <div class="todo-dialog-actions">
           <div>
@@ -1903,6 +1996,7 @@
       );
       const todoModal = document.querySelector("#todo-modal");
       const todoEditList = document.querySelector("#todo-edit-list");
+      const todoDragStatus = document.querySelector("#todo-drag-status");
       const todoDialogError = document.querySelector("#todo-dialog-error");
       const cancelTodoEditButton = document.querySelector("#cancel-todo-edit");
       const saveTodoEditButton = document.querySelector("#save-todo-edit");
@@ -1924,6 +2018,7 @@
       let todoMode = false;
       let editingTodoEntryId = null;
       let todoDialogReturnFocus = null;
+      let todoDragState = null;
 
       function byteLength(text) {
         return encoder.encode(text).length;
@@ -2421,6 +2516,207 @@
         return button;
       }
 
+      function updateTodoDragHandles() {
+        const rows = Array.from(todoEditList.children);
+        rows.forEach((row, index) => {
+          const handle = row.querySelector(".todo-drag-handle");
+          if (!handle) return;
+          handle.disabled = rows.length < 2;
+          handle.setAttribute(
+            "aria-label",
+            `移动第 ${index + 1} 个待办项目，上下方向键也可排序`,
+          );
+        });
+      }
+
+      function announceTodoPosition(row) {
+        const rows = Array.from(todoEditList.children);
+        const position = rows.indexOf(row) + 1;
+        todoDragStatus.textContent = `已移动到第 ${position} 项，共 ${rows.length} 项`;
+      }
+
+      function clearTodoDropTarget(state) {
+        state.before?.classList.remove("todo-drop-before");
+        todoEditList.classList.remove("todo-drop-at-end");
+        state.before = null;
+      }
+
+      function updateTodoDropTarget(row, clientY) {
+        const state = todoDragState;
+        if (!state) return;
+        const candidates = Array.from(todoEditList.children).filter(
+          (candidate) => candidate !== row,
+        );
+        const before = candidates.find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return clientY < rect.top + rect.height / 2;
+        });
+        const nextBefore = before || null;
+        if (state.before === nextBefore) return;
+        clearTodoDropTarget(state);
+        state.before = nextBefore;
+        if (before) {
+          before.classList.add("todo-drop-before");
+        } else {
+          todoEditList.classList.add("todo-drop-at-end");
+        }
+      }
+
+      function runTodoDragAutoScroll() {
+        const state = todoDragState;
+        if (!state || !state.dragging || !state.scrollDirection) return;
+        const previousScrollTop = todoEditList.scrollTop;
+        todoEditList.scrollTop += state.scrollDirection * 8;
+        if (todoEditList.scrollTop !== previousScrollTop) {
+          updateTodoDropTarget(state.row, state.clientY);
+        }
+        state.autoScrollFrame = requestAnimationFrame(
+          runTodoDragAutoScroll,
+        );
+      }
+
+      function updateTodoDragAutoScroll(clientY) {
+        const state = todoDragState;
+        if (!state?.dragging) return;
+        const rect = todoEditList.getBoundingClientRect();
+        const edge = Math.min(42, rect.height / 4);
+        state.scrollDirection =
+          clientY < rect.top + edge
+            ? -1
+            : clientY > rect.bottom - edge
+              ? 1
+              : 0;
+        if (state.scrollDirection && !state.autoScrollFrame) {
+          state.autoScrollFrame = requestAnimationFrame(
+            runTodoDragAutoScroll,
+          );
+        } else if (!state.scrollDirection && state.autoScrollFrame) {
+          cancelAnimationFrame(state.autoScrollFrame);
+          state.autoScrollFrame = 0;
+        }
+      }
+
+      function finishTodoDrag() {
+        const state = todoDragState;
+        if (!state) return;
+        todoDragState = null;
+        if (state.autoScrollFrame) {
+          cancelAnimationFrame(state.autoScrollFrame);
+        }
+        if (state.dragging) {
+          if (state.before?.parentNode === todoEditList) {
+            todoEditList.insertBefore(state.row, state.before);
+          } else {
+            todoEditList.append(state.row);
+          }
+        }
+        state.before?.classList.remove("todo-drop-before");
+        todoEditList.classList.remove("todo-drop-at-end");
+        state.ghost?.remove();
+        state.row.classList.remove("is-dragging");
+        todoEditList.classList.remove("is-dragging");
+        state.handle.removeAttribute("aria-grabbed");
+        if (state.handle.hasPointerCapture?.(state.pointerId)) {
+          state.handle.releasePointerCapture(state.pointerId);
+        }
+        updateTodoDragHandles();
+        if (state.dragging) announceTodoPosition(state.row);
+      }
+
+      function createTodoDragHandle(row) {
+        const handle = document.createElement("button");
+        handle.type = "button";
+        handle.className = "todo-drag-handle";
+        handle.textContent = "⠿";
+        handle.title = "拖动排序";
+
+        handle.addEventListener("keydown", (event) => {
+          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+          event.preventDefault();
+          const target =
+            event.key === "ArrowUp"
+              ? row.previousElementSibling
+              : row.nextElementSibling;
+          if (!target) return;
+          if (event.key === "ArrowUp") {
+            todoEditList.insertBefore(row, target);
+          } else {
+            todoEditList.insertBefore(row, target.nextElementSibling);
+          }
+          updateTodoDragHandles();
+          announceTodoPosition(row);
+          handle.focus({ preventScroll: true });
+        });
+
+        handle.addEventListener("pointerdown", (event) => {
+          if (handle.disabled || (event.button !== 0 && event.button !== -1)) {
+            return;
+          }
+          finishTodoDrag();
+          todoDragState = {
+            pointerId: event.pointerId,
+            handle,
+            row,
+            startY: event.clientY,
+            clientY: event.clientY,
+            dragging: false,
+            before: undefined,
+            ghost: null,
+            scrollDirection: 0,
+            autoScrollFrame: 0,
+          };
+          handle.setPointerCapture(event.pointerId);
+        });
+
+        handle.addEventListener("pointermove", (event) => {
+          const state = todoDragState;
+          if (!state || state.pointerId !== event.pointerId) return;
+          state.clientY = event.clientY;
+          if (!state.dragging && Math.abs(event.clientY - state.startY) < 6) {
+            return;
+          }
+          if (!state.dragging) {
+            state.dragging = true;
+            const rect = row.getBoundingClientRect();
+            const ghost = row.cloneNode(true);
+            ghost.classList.add("todo-drag-ghost");
+            ghost.setAttribute("aria-hidden", "true");
+            ghost.querySelectorAll("button, textarea").forEach((control) => {
+              control.disabled = true;
+              control.removeAttribute("id");
+            });
+            Object.assign(ghost.style, {
+              top: `${rect.top}px`,
+              left: `${rect.left}px`,
+              width: `${rect.width}px`,
+              height: `${rect.height}px`,
+            });
+            document.body.append(ghost);
+            state.ghost = ghost;
+            row.classList.add("is-dragging");
+            todoEditList.classList.add("is-dragging");
+            handle.setAttribute("aria-grabbed", "true");
+          }
+          event.preventDefault();
+          state.ghost.style.transform = `translate3d(0, ${
+            event.clientY - state.startY
+          }px, 0)`;
+          updateTodoDropTarget(row, event.clientY);
+          updateTodoDragAutoScroll(event.clientY);
+        });
+
+        handle.addEventListener("pointerup", (event) => {
+          if (todoDragState?.pointerId === event.pointerId) finishTodoDrag();
+        });
+        handle.addEventListener("pointercancel", (event) => {
+          if (todoDragState?.pointerId === event.pointerId) finishTodoDrag();
+        });
+        handle.addEventListener("lostpointercapture", () => {
+          if (todoDragState?.handle === handle) finishTodoDrag();
+        });
+        return handle;
+      }
+
       function addTodoEditRow(
         item = { content: "", stage: 1 },
         beforeNode = null,
@@ -2429,6 +2725,8 @@
         row.className = "todo-edit-item";
         if (item.id) row.dataset.itemId = String(item.id);
         row.dataset.stage = String(item.stage || 1);
+
+        const dragHandle = createTodoDragHandle(row);
 
         const input = document.createElement("textarea");
         input.className = "todo-edit-input";
@@ -2488,6 +2786,7 @@
             const target = row.previousElementSibling || row.nextElementSibling;
             row.remove();
             const targetInput = target?.querySelector("textarea");
+            updateTodoDragHandles();
             targetInput?.focus();
             targetInput?.setSelectionRange(
               targetInput.value.length,
@@ -2523,8 +2822,9 @@
           );
         });
 
-        row.append(input, picker);
+        row.append(dragHandle, input, picker);
         todoEditList.insertBefore(row, beforeNode);
+        updateTodoDragHandles();
         requestAnimationFrame(resizeInput);
         return input;
       }
@@ -2541,6 +2841,7 @@
       }
 
       function closeTodoEditor() {
+        finishTodoDrag();
         todoModal.hidden = true;
         editingTodoEntryId = null;
         todoEditList.replaceChildren();
@@ -3889,7 +4190,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=35", {
+            .register("/service-worker.js?v=37", {
               updateViaCache: "none",
             })
             .then(async (registration) => {

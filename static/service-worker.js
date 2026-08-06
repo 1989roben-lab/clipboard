@@ -1,6 +1,6 @@
-const CACHE_NAME = "memory-shell-v35";
+const CACHE_NAME = "memory-shell-v37";
 const APP_SHELL = [
-  "/?app=v35",
+  "/?app=v37",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -58,11 +58,11 @@ self.addEventListener("fetch", (event) => {
             const copy = response.clone();
             caches
               .open(CACHE_NAME)
-                .then((cache) => cache.put("/?app=v35", copy));
+                .then((cache) => cache.put("/?app=v37", copy));
           }
           return response;
         })
-        .catch(() => caches.match("/?app=v35")),
+        .catch(() => caches.match("/?app=v37")),
     );
     return;
   }
