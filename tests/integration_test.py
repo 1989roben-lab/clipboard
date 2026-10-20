@@ -381,7 +381,7 @@ def main() -> None:
             assert "Windows" not in page_text
             assert 'id="install-modal"' in page_text
             assert 'loadEntries({ force: true })' in page_text
-            assert 'register("/service-worker.js?v=40"' in page_text
+            assert 'register("/service-worker.js?v=41"' in page_text
             assert 'editor.addEventListener("compositionstart"' in page_text
             assert 'editor.addEventListener("compositionend"' in page_text
             assert "event.isComposing || editorIsComposing" in page_text
@@ -406,7 +406,7 @@ def main() -> None:
             assert page_headers.get_content_type() == "text/html"
             assert page_headers["Cache-Control"] == "no-store, max-age=0"
             versioned_page, versioned_page_headers = server.call(
-                "/?app=v40"
+                "/?app=v41"
             )
             assert versioned_page == page
             assert (
@@ -420,7 +420,7 @@ def main() -> None:
             manifest = json.loads(manifest_body)
             assert manifest["display"] == "standalone"
             assert manifest["name"] == "Memory"
-            assert manifest["start_url"] == "/?app=v40"
+            assert manifest["start_url"] == "/?app=v41"
             assert all("?v=14" in icon["src"] for icon in manifest["icons"])
             assert {icon["sizes"] for icon in manifest["icons"]} >= {
                 "192x192",
@@ -439,8 +439,8 @@ def main() -> None:
             worker_text = worker.decode("utf-8")
             assert 'url.pathname.startsWith("/api/")' in worker_text
             assert 'request.mode === "navigate"' in worker_text
-            assert '.catch(() => caches.match("/?app=v40"))' in worker_text
-            assert 'memory-shell-v40' in worker_text
+            assert '.catch(() => caches.match("/?app=v41"))' in worker_text
+            assert 'memory-shell-v41' in worker_text
             assert 'ACTIVATE_UPDATE' in worker_text
             assert worker_headers.get_content_type() == "application/javascript"
             assert worker_headers["Cache-Control"] == "no-cache"

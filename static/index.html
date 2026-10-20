@@ -1510,9 +1510,15 @@
         position: fixed;
         inset: 0;
         z-index: 45;
-        display: grid;
+        top: var(--todo-viewport-top, 0px);
+        bottom: auto;
+        height: var(--todo-viewport-height, 100vh);
+        height: var(--todo-viewport-height, 100dvh);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
         padding: 18px;
-        place-items: center;
         background: rgba(225, 231, 239, 0.62);
         -webkit-backdrop-filter: blur(28px) saturate(160%);
         backdrop-filter: blur(28px) saturate(160%);
@@ -1524,8 +1530,10 @@
       .todo-panel {
         display: flex;
         width: min(100%, 620px);
-        max-height: min(86vh, 760px);
-        max-height: min(86dvh, 760px);
+        min-height: 0;
+        max-height: min(86vh, 760px, 100%);
+        max-height: min(86dvh, 760px, 100%);
+        overflow: hidden;
         flex-direction: column;
         padding: 22px;
         border: 1px solid rgba(255, 255, 255, 0.84);
@@ -1535,6 +1543,7 @@
       }
 
       .todo-panel h2 { margin-bottom: 6px; }
+      .todo-panel > :not(.todo-edit-list) { flex-shrink: 0; }
 
       .todo-dialog-help {
         margin: 0 0 14px;
@@ -1546,7 +1555,11 @@
       .todo-edit-list {
         display: grid;
         overflow-y: auto;
-        min-height: 180px;
+        min-height: 0;
+        flex: 1 1 auto;
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-y;
         align-content: start;
         gap: 0;
         padding: 8px;
@@ -1711,7 +1724,6 @@
         .composer.todo-mode .todo-mode-button { grid-column: 1 / -1; }
         .stage-button { min-height: 26px; }
         .todo-modal {
-          height: 100dvh;
           padding: max(10px, env(safe-area-inset-top)) 10px
             max(10px, env(safe-area-inset-bottom));
         }
@@ -3189,6 +3201,16 @@
         return input;
       }
 
+      function syncTodoViewport() {
+        if (todoModal.hidden) return;
+        const viewport = window.visualViewport;
+        todoModal.style.setProperty('--todo-viewport-height', `${viewport?.height || window.innerHeight}px`);
+        todoModal.style.setProperty('--todo-viewport-top', `${viewport?.offsetTop || 0}px`);
+      }
+      window.visualViewport?.addEventListener('resize', syncTodoViewport);
+      window.visualViewport?.addEventListener('scroll', syncTodoViewport);
+      window.addEventListener('resize', syncTodoViewport);
+
       function openTodoEditor(entry, returnFocus) {
         editingTodoEntryId = entry.id;
         todoDialogReturnFocus = returnFocus;
@@ -3197,12 +3219,15 @@
         (entry.items || []).forEach((item) => addTodoEditRow(item));
         if (!todoEditList.children.length) addTodoEditRow();
         todoModal.hidden = false;
+        syncTodoViewport();
         todoModal.focus({ preventScroll: true });
       }
 
       function closeTodoEditor() {
         finishTodoDrag();
         todoModal.hidden = true;
+        todoModal.style.removeProperty('--todo-viewport-height');
+        todoModal.style.removeProperty('--todo-viewport-top');
         editingTodoEntryId = null;
         todoEditList.replaceChildren();
         const returnFocus = todoDialogReturnFocus;
@@ -4610,7 +4635,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=40", {
+            .register("/service-worker.js?v=41", {
               updateViaCache: "none",
             })
             .then(async (registration) => {

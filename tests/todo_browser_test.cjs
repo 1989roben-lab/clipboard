@@ -211,8 +211,58 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     await phone.locator('article').filter({ has: phone.locator('.todo-content') }).getByRole('button', { name: '编辑', exact: true }).click();
     assert.equal(await phone.locator('#todo-edit-list textarea').count(), 3);
     await phone.locator('#cancel-todo-edit').click();
+    // Long bulk-edit lists must scroll independently while Save stays visible,
+    // including short viewports representing the space above a mobile keyboard.
+    const longTodo = (await api('/api/entries', 'POST', { type: 'todo',
+      items: Array.from({ length: 35 }, (_, index) => `项目 ${index + 1}：很长的待办内容，需要多行显示并可以继续添加事项。`) })).entry;
+    await phone.evaluate(() => loadEntries({ force: true }));
+    await phone.locator('article').filter({ has: phone.locator(`.todo-item[data-item-id="${longTodo.items[0].id}"]`) })
+      .getByRole('button', { name: '编辑', exact: true }).click();
+    async function checkModalFits() {
+      const metrics = await phone.evaluate(() => {
+        const list = document.querySelector('#todo-edit-list');
+        const save = document.querySelector('#save-todo-edit');
+        const panel = document.querySelector('.todo-panel');
+        const viewport = visualViewport;
+        const rect = save.getBoundingClientRect(), panelRect = panel.getBoundingClientRect();
+        return { scrollable: list.scrollHeight > list.clientHeight, listHeight: list.clientHeight,
+          saveTop: rect.top, saveBottom: rect.bottom, panelTop: panelRect.top, panelBottom: panelRect.bottom,
+          viewportTop: viewport.offsetTop, viewportBottom: viewport.offsetTop + viewport.height,
+          hitSave: document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === save };
+      });
+      assert(metrics.scrollable && metrics.listHeight > 25, JSON.stringify(metrics));
+      assert(metrics.saveTop >= metrics.viewportTop && metrics.saveBottom <= metrics.viewportBottom, JSON.stringify(metrics));
+      assert(metrics.panelTop >= metrics.viewportTop && metrics.panelBottom <= metrics.viewportBottom, JSON.stringify(metrics));
+      assert(metrics.hitSave, JSON.stringify(metrics));
+    }
+    for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 },
+      { width: 390, height: 360 }, { width: 844, height: 390 }]) {
+      await phone.setViewportSize(viewport);
+      await phone.waitForFunction(() => Math.abs(parseFloat(document.querySelector('#todo-modal').style.getPropertyValue('--todo-viewport-height')) - visualViewport.height) < 1);
+      await checkModalFits();
+    }
+    await phone.setViewportSize({ width: 390, height: 700 });
+    await phone.waitForFunction(() => parseFloat(document.querySelector('#todo-modal').style.getPropertyValue('--todo-viewport-height')) === visualViewport.height);
+    const listRect = await phone.locator('#todo-edit-list').boundingBox();
+    await touch('touchStart', listRect.x + 5, listRect.y + listRect.height - 20);
+    for (let step = 1; step <= 6; step++) {
+      await touch('touchMove', listRect.x + 5, listRect.y + listRect.height - 20 - step * Math.min(25, (listRect.height - 40) / 6));
+    }
+    await touch('touchEnd');
+    await phone.waitForFunction(() => document.querySelector('#todo-edit-list').scrollTop > 0);
+    await checkModalFits();
+    const lastInput = phone.locator('#todo-edit-list textarea').last();
+    await lastInput.scrollIntoViewIfNeeded(); await lastInput.focus(); await lastInput.press('End');
+    await lastInput.press('Enter');
+    await phone.locator('#todo-edit-list textarea').last().fill('新增后仍可点击保存');
+    await checkModalFits();
+    await phone.locator('#save-todo-edit').tap();
+    await phone.waitForFunction(() => document.querySelector('#todo-modal').hidden);
+    const savedLongTodo = (await api('/api/entries')).entries.find(e => e.id === longTodo.id);
+    assert.equal(savedLongTodo.items.length, 36);
+    assert.equal(savedLongTodo.items.at(-1).content, '新增后仍可点击保存');
     assert.deepEqual(errors, []);
-    console.log('PASS: unchanged appearance, original-node todo/text editing, multiline/paste, validation, IME, failure/retry, switching, refresh race, stage, keyboard/mouse sorting, persistence; mobile tap, hold, cancel, scrolling, bulk editor');
+    console.log('PASS: unchanged appearance, original-node todo/text editing, multiline/paste, validation, IME, failure/retry, switching, refresh race, stage, keyboard/mouse sorting, persistence; mobile tap, hold, cancel, scrolling, bulk editor, long-list scrolling and visible Save in small/keyboard viewports');
     await mobile.close();
   } finally {
     if (browser) await browser.close();
