@@ -8,3 +8,7 @@ __pycache__
 ._*
 *.bak*
 README.md
+
+# Exclude nested desktop metadata and local backups from the image.
+**/._*
+**/*.bak*
