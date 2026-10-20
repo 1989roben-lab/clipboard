@@ -8,6 +8,7 @@
 !README.md
 !PROJECT_HANDOFF.md
 !compose.yaml
+!compose.memory1.yaml
 !server.py
 !static/
 !static/index.html
@@ -21,3 +22,5 @@
 !static/icons/memory-icon-master.png
 !tests/
 !tests/integration_test.py
+!tests/todo_inline_test.py
+!tests/todo_browser_test.cjs

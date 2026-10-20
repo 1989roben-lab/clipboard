@@ -1,0 +1,59 @@
+name: memory1-8019
+
+services:
+  memory1:
+    build:
+      context: .
+    image: memory1-8019-app:local
+    container_name: memory1-8019
+    restart: unless-stopped
+    init: true
+    read_only: true
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8016"
+      DB_PATH: /data/memory1.db
+      MEMORY_INSTANCE: memory1
+    ports:
+      - "127.0.0.1:8019:8016"
+    volumes:
+      - memory1-data:/data
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: memory1-cloudflared
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN is required}
+    depends_on:
+      memory1:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  memory1-data:
+    name: memory1-8019-data

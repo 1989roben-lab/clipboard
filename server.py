@@ -65,6 +65,7 @@ MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_FILE_CHUNK_BYTES = 8 * 1024 * 1024
 FILE_UPLOAD_TTL_SECONDS = 24 * 60 * 60
 ENTRY_PATH = re.compile(r"^/api/entries/([1-9][0-9]*)$")
+TODO_ORDER_PATH = re.compile(r"^/api/entries/([1-9][0-9]*)/todo-order$")
 TODO_ITEM_PATH = re.compile(r"^/api/todo-items/([1-9][0-9]*)$")
 IMAGE_PATH = re.compile(
     r"^/api/images/([1-9][0-9]*)(/download)?$"
@@ -551,6 +552,10 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "未找到该接口"})
 
     def do_PATCH(self) -> None:
+        order_match = TODO_ORDER_PATH.fullmatch(self.path)
+        if order_match:
+            self.update_todo_order(int(order_match.group(1)))
+            return
         todo_item_match = TODO_ITEM_PATH.fullmatch(self.path)
         if todo_item_match:
             self.update_todo_stage(int(todo_item_match.group(1)))
@@ -974,55 +979,88 @@ class ClipboardHandler(BaseHTTPRequestHandler):
             {"entry": public_entry(row, connection)},
         )
 
-    def update_todo_stage(self, item_id: int) -> None:
+    def update_todo_order(self, entry_id: int) -> None:
         payload = self.read_json_body()
         if payload is None:
             return
-        stage = payload.get("stage")
+        ids = payload.get("item_ids")
         if (
-            not isinstance(stage, int)
-            or isinstance(stage, bool)
-            or stage < 1
-            or stage > 5
+            not isinstance(ids, list) or not ids
+            or any(type(item_id) is not int or item_id <= 0 for item_id in ids)
+            or len(set(ids)) != len(ids)
         ):
-            self.send_json(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "Stage 必须是 1 到 5"},
-            )
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "待办项目 ID 无效或重复"})
             return
         with connect_db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            entry = connection.execute(
+                "SELECT * FROM entries WHERE id = ?", (entry_id,)
+            ).fetchone()
+            if entry is None:
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "这条记录不存在"})
+                return
+            if entry["entry_type"] != "todo":
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "只能调整待办清单的顺序"})
+                return
+            existing = {row["id"] for row in connection.execute(
+                "SELECT id FROM todo_items WHERE entry_id = ?", (entry_id,)
+            )}
+            if set(ids) != existing:
+                self.send_json(HTTPStatus.CONFLICT, {"error": "清单项目已变化，请刷新后重试"})
+                return
+            connection.executemany(
+                "UPDATE todo_items SET position = ? WHERE id = ? AND entry_id = ?",
+                [(position, item_id, entry_id) for position, item_id in enumerate(ids)],
+            )
+            result = public_entry(entry, connection)
+        self.send_json(HTTPStatus.OK, {"entry": result})
+
+    def update_todo_stage(self, item_id: int) -> None:
+        # Partial item updates preserve fields changed by other clients.
+        payload = self.read_json_body()
+        if payload is None:
+            return
+        if not payload or not set(payload).issubset({"content", "stage"}):
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "请提交内容或 Stage"})
+            return
+        if "stage" in payload and (
+            type(payload["stage"]) is not int or not 1 <= payload["stage"] <= 5
+        ):
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Stage 必须是 1 到 5"})
+            return
+        if "content" in payload:
+            if not isinstance(payload["content"], str) or not payload["content"].strip():
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "待办项目内容不能为空"})
+                return
+            payload["content"] = payload["content"].strip()
+        with connect_db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                """
-                SELECT id, entry_id, content, stage
-                FROM todo_items
-                WHERE id = ?
-                """,
+                "SELECT id, entry_id, content, stage FROM todo_items WHERE id = ?",
                 (item_id,),
             ).fetchone()
             if row is None:
-                self.send_json(
-                    HTTPStatus.NOT_FOUND,
-                    {"error": "这个待办项目不存在"},
-                )
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "这个待办项目不存在"})
                 return
+            if "content" in payload:
+                total = connection.execute(
+                    "SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) "
+                    "FROM todo_items WHERE entry_id = ? AND id != ?",
+                    (row["entry_id"], item_id),
+                ).fetchone()[0]
+                if total + len(payload["content"].encode("utf-8")) > MAX_CONTENT_BYTES:
+                    self.send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                                   {"error": "待办项目合计不能超过 200 KB"})
+                    return
+            fields = list(payload)
             connection.execute(
-                """
-                UPDATE todo_items
-                SET stage = ?,
-                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                WHERE id = ?
-                """,
-                (stage, item_id),
+                "UPDATE todo_items SET " + ", ".join(field + " = ?" for field in fields)
+                + ", updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                [payload[field] for field in fields] + [item_id],
             )
-            item = {
-                "id": row["id"],
-                "content": row["content"],
-                "stage": stage,
-            }
-        self.send_json(
-            HTTPStatus.OK,
-            {"entry_id": row["entry_id"], "item": item},
-        )
+            item = {"id": item_id, "content": payload.get("content", row["content"]),
+                    "stage": payload.get("stage", row["stage"])}
+        self.send_json(HTTPStatus.OK, {"entry_id": row["entry_id"], "item": item})
 
     def create_image_entry(self) -> None:
         try:

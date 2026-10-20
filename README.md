@@ -54,3 +54,53 @@ docker compose down
 记录、上传文件和未完成上传；普通的 `docker compose down` 不会删除
 记录。`docker compose down -v` 会删除整个数据卷，请勿用于日常停止
 服务。
+
+## memory1 独立实例（已停用）
+
+自 2026-10-20 起，服务器仅保留 `https://memory.s1242624.org/`，对应
+`lan-clipboard-8016` 应用和 `clipboard-cloudflared` 隧道容器。
+`memory1-8019`、`memory1-cloudflared` 及其专用网络已移除；原数据卷
+`memory1-8019-data` 和停用前备份保留，未与主实例合并。
+以下配置仅供恢复独立实例时参考，不作为日常部署步骤。
+
+`memory1.s1242624.org` 使用 `compose.memory1.yaml` 单独部署，不与原实例
+共享容器、网络、端口、配置或数据卷：
+
+- 应用容器：`memory1-8019`
+- Tunnel 容器：`memory1-cloudflared`
+- 本机地址：`http://127.0.0.1:8019`
+- 数据卷：`memory1-8019-data`（数据库 `/data/memory1.db`）
+- Compose 网络：`memory1-8019_default`
+- Cloudflare Tunnel：`memory1-8019`
+
+Tunnel token 保存在被 Git 忽略且权限为 `0600` 的 `.env`，与原实例部署
+目录 `/home/aa/apps/clipboard` 中的配置完全分开。管理新实例时必须显式指定
+它的 Compose 文件：
+
+```sh
+docker compose -f compose.memory1.yaml ps
+docker compose -f compose.memory1.yaml logs -f
+docker compose -f compose.memory1.yaml up -d --build
+docker compose -f compose.memory1.yaml restart
+docker compose -f compose.memory1.yaml down
+```
+
+请勿对新实例执行 `docker compose -f compose.memory1.yaml down -v`，该命令会
+删除 `memory1-8019-data` 中的独立数据库及上传文件。
+
+## 待办事项直接操作
+
+- 点击待办框的文字或空白区域可直接修改，离开输入框或按回车自动保存，Esc 取消；进度色块仍用于修改进度。
+- 电脑按住待办框上下拖动排序；手机长按约半秒后拖动，普通滑动仍可滚动页面。正在编辑文字时不触发拖动。
+- 键盘聚焦待办框后，Enter 编辑，Alt＋上下方向键排序；原“编辑”按钮继续支持批量修改。
+- 保存失败会保留草稿，按回车或再次离开输入框可重试；排序失败恢复原顺序。
+
+独立数据验证：`python3 tests/todo_inline_test.py`、`python3 tests/integration_test.py`。
+安装 Playwright 和 Chromium 后可运行 `node tests/todo_browser_test.cjs`；也可通过
+`PLAYWRIGHT_MODULE` 指定已有 Playwright 安装位置。浏览器测试使用临时数据库，覆盖电脑操作与 Chromium 手机触摸模拟，不代表 iOS Safari 或 Android 真机验证。
+
+### 原文字编辑（v40）
+
+待办事项和普通文字卡片都直接在原文字上编辑，保留原字体、字号和背景，不新增输入框。
+普通文字回车换行，点击外部或 Ctrl／⌘＋回车保存，Esc 取消；待办仍按回车保存。
+校验或保存失败会保留草稿，修正后再保存。图片和附件说明继续使用原有编辑方式。

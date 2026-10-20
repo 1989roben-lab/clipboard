@@ -1419,6 +1419,20 @@
         background: rgba(255, 255, 255, 0.5);
       }
 
+      .todo-item { cursor: grab; -webkit-touch-callout: none; }
+      .todo-item:not(.is-editing) { user-select: none; -webkit-user-select: none; }
+      .todo-item:not(.is-editing):focus-visible { outline: 2px solid #2789ed; outline-offset: 2px; }
+      .todo-item.is-editing { cursor: text; -webkit-touch-callout: default; }
+      .todo-item:has(.todo-inline-error:not(:empty)) { flex-wrap: wrap; }
+      .original-text-editing { outline: none; cursor: text;
+        user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }
+      .todo-inline-error { flex-basis: 100%; font-size: 12px; color: #a12626; }
+      .todo-inline-error:empty { display: none; }
+      .todo-page-dragging { opacity: .45; outline: 2px dashed #2789ed; }
+      .todo-page-ghost { position: fixed; z-index: 10000; pointer-events: none;
+        box-sizing: border-box; background: #eef7ff; box-shadow: 0 6px 20px #2344; }
+      body.todo-page-sorting { user-select: none; -webkit-user-select: none; cursor: grabbing; }
+
       .todo-item-text {
         min-width: 0;
         flex: 0 1 auto;
@@ -1874,6 +1888,11 @@
         </div>
       </div>
     </div>
+        <p
+          class="visually-hidden"
+          id="todo-drag-status"
+          aria-live="polite"
+        ></p>
     <div
       class="todo-modal"
       id="todo-modal"
@@ -1889,11 +1908,6 @@
           每行一个项目；拖动左侧手柄排序，按回车新增，右侧调整 Stage。
         </p>
         <div class="todo-edit-list" id="todo-edit-list"></div>
-        <p
-          class="visually-hidden"
-          id="todo-drag-status"
-          aria-live="polite"
-        ></p>
         <p class="todo-dialog-error" id="todo-dialog-error" aria-live="polite"></p>
         <div class="todo-dialog-actions">
           <div>
@@ -1950,6 +1964,7 @@
       const IMAGE_COMPRESSION_QUALITIES = [0.82, 0.68, 0.54];
       const QUICK_PHOTO_MAX_EDGE = 1280;
       const QUICK_PHOTO_QUALITY = 0.72;
+      const EDITOR_CARET_ANCHOR = "\u200b";
       const ALLOWED_IMAGE_TYPES = new Set([
         "image/png",
         "image/jpeg",
@@ -2019,6 +2034,7 @@
       let editingTodoEntryId = null;
       let todoDialogReturnFocus = null;
       let todoDragState = null;
+      let editorIsComposing = false;
 
       function byteLength(text) {
         return encoder.encode(text).length;
@@ -2052,7 +2068,10 @@
               return;
             }
             if (node.nodeType === Node.TEXT_NODE) {
-              content += node.nodeValue || "";
+              content += (node.nodeValue || "").replaceAll(
+                EDITOR_CARET_ANCHOR,
+                "",
+              );
               return;
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -2060,9 +2079,13 @@
               content += "\n";
               return;
             }
+            const isBlock = blockTags.has(node.tagName);
+            if (isBlock && content && !content.endsWith("\n")) {
+              content += "\n";
+            }
             walk(node);
             if (
-              blockTags.has(node.tagName) &&
+              isBlock &&
               index < children.length - 1 &&
               !content.endsWith("\n")
             ) {
@@ -2434,6 +2457,338 @@
         );
       }
 
+      // An epoch also rejects GETs started before an interaction began.
+      let todoInteractionEpoch = 0;
+      let inlineTodoEdit = null;
+      let pageTodoDrag = null;
+      let pendingTodoWrites = 0;
+      const todoWriteQueues = new Map();
+      function todoInteractionBusy() {
+        return Boolean(inlineTodoEdit || pageTodoDrag || pendingTodoWrites);
+      }
+      function resumeTodoSync() {
+        if (!todoInteractionBusy()) loadEntries({ silent: true });
+      }
+      function queueTodoWrite(entryId, operation) {
+        pendingTodoWrites += 1;
+        todoInteractionEpoch += 1;
+        const previous = todoWriteQueues.get(entryId) || Promise.resolve();
+        const request = previous.catch(() => {}).then(operation);
+        const settled = request.finally(() => {
+          pendingTodoWrites -= 1;
+          if (todoWriteQueues.get(entryId) === settled) todoWriteQueues.delete(entryId);
+        });
+        todoWriteQueues.set(entryId, settled);
+        return settled;
+      }
+      function replaceTodoItem(entryId, item) {
+        const entry = entries.find((candidate) => candidate.id === entryId);
+        const target = entry?.items.find((candidate) => candidate.id === item.id);
+        if (target) Object.assign(target, item);
+      }
+      function enablePlainTextEditing(node) {
+        node.setAttribute('contenteditable', 'plaintext-only');
+        if (node.contentEditable !== 'plaintext-only') node.contentEditable = 'true';
+      }
+      async function beginInlineTodoEdit(entryId, itemId, row, event = null) {
+        return beginOriginalEdit(entryId, itemId, row.querySelector('.todo-item-text'), row, event);
+      }
+      async function beginOriginalEdit(entryId, itemId, node, row = null, event = null) {
+        if (pageTodoDrag || (pendingTodoWrites && !inlineTodoEdit)) return;
+        if (inlineTodoEdit) {
+          if (inlineTodoEdit.input === node) return;
+          if (!(await saveInlineTodoEdit())) return;
+        }
+        const entry = entries.find((candidate) => candidate.id === entryId);
+        const item = itemId == null ? null : entry?.items.find((candidate) => candidate.id === itemId);
+        if (!entry || (itemId != null && !item) || !node.isConnected) return;
+        todoInteractionEpoch += 1;
+        const error = document.createElement('span');
+        error.className = 'todo-inline-error';
+        error.id = `inline-error-${entryId}-${itemId || 'text'}`;
+        error.setAttribute('role', 'alert');
+        const controller = new AbortController();
+        const state = { entryId, itemId, row, input: node, error,
+          original: item ? item.content : entry.content, composing: false, saving: null, controller };
+        inlineTodoEdit = state;
+        row?.classList.add('is-editing');
+        node.classList.add('original-text-editing');
+        enablePlainTextEditing(node);
+        node.setAttribute('role', 'textbox');
+        node.setAttribute('aria-label', item ? '待办项目内容' : '文字内容');
+        node.setAttribute('aria-multiline', String(!item));
+        node.setAttribute('aria-describedby', error.id);
+        node.spellcheck = false;
+        if (row) row.append(error); else node.after(error);
+        const on = (type, callback) => node.addEventListener(type, callback, { signal: controller.signal });
+        on('input', () => { error.textContent = ''; node.removeAttribute('aria-invalid'); });
+        on('compositionstart', () => { state.composing = true; });
+        on('compositionend', () => {
+          state.composing = false;
+          if (document.activeElement !== node) saveInlineTodoEdit();
+        });
+        on('keydown', (event) => {
+          if (event.isComposing || state.composing || event.keyCode === 229) return;
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            if (!state.saving) finishInlineTodoEdit(state, state.original);
+          } else if (event.key === 'Enter' && (item || event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            saveInlineTodoEdit();
+          }
+        });
+        on('beforeinput', (event) => {
+          if (state.saving || event.inputType.startsWith('format')) event.preventDefault();
+        });
+        const insertPlainText = (event, transfer) => {
+          event.preventDefault();
+          if (!state.saving) document.execCommand('insertText', false, transfer?.getData('text/plain') || '');
+        };
+        on('paste', (event) => insertPlainText(event, event.clipboardData));
+        on('drop', (event) => insertPlainText(event, event.dataTransfer));
+        on('blur', () => { if (!state.composing) saveInlineTodoEdit(); });
+        node.focus({ preventScroll: true });
+        // Keep the clicked insertion position, including browsers using WebKit's API.
+        let range = null;
+        if (event && Number.isFinite(event.clientX)) {
+          const position = document.caretPositionFromPoint?.(event.clientX, event.clientY);
+          if (position && node.contains(position.offsetNode)) {
+            range = document.createRange();
+            range.setStart(position.offsetNode, position.offset);
+          } else {
+            const candidate = document.caretRangeFromPoint?.(event.clientX, event.clientY);
+            if (candidate && node.contains(candidate.startContainer)) range = candidate;
+          }
+        }
+        if (!range) {
+          range = document.createRange();
+          range.selectNodeContents(node);
+          range.collapse(false);
+        }
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      function finishInlineTodoEdit(state, content) {
+        if (inlineTodoEdit !== state) return;
+        const restoreFocus = document.activeElement === state.input;
+        state.controller.abort();
+        inlineTodoEdit = null;
+        state.input.textContent = content;
+        state.input.removeAttribute('contenteditable');
+        state.input.classList.remove('original-text-editing');
+        for (const attribute of ['role', 'aria-label', 'aria-multiline', 'aria-describedby', 'aria-invalid', 'aria-busy']) {
+          state.input.removeAttribute(attribute);
+        }
+        state.error.remove();
+        state.row?.classList.remove('is-editing');
+        if (restoreFocus) (state.row || state.input).focus({ preventScroll: true });
+        resumeTodoSync();
+      }
+      async function saveInlineTodoEdit() {
+        const state = inlineTodoEdit;
+        if (!state) return true;
+        if (state.saving) return state.saving;
+        if (state.composing) return false;
+        const rawContent = state.input.innerText.replace(/\r\n?/g, '\n');
+        const content = state.itemId == null ? rawContent : rawContent.trim();
+        let validation = '';
+        if (!content.trim()) validation = '内容不能为空；按 Esc 可取消修改。';
+        const entry = entries.find((candidate) => candidate.id === state.entryId);
+        const bytes = byteLength(content) + (state.itemId == null ? 0 :
+          (entry?.items || []).filter((item) => item.id !== state.itemId)
+            .reduce((total, item) => total + byteLength(item.content), 0));
+        if (bytes > MAX_BYTES) validation = '内容合计不能超过 200 KB；请缩短后重试。';
+        if (validation) {
+          state.error.textContent = validation;
+          state.input.setAttribute('aria-invalid', 'true');
+          return false;
+        }
+        if (content === state.original) {
+          finishInlineTodoEdit(state, content);
+          return true;
+        }
+        state.input.setAttribute('aria-busy', 'true');
+        state.saving = (async () => {
+          try {
+            const url = state.itemId == null ? `/api/entries/${state.entryId}` : `/api/todo-items/${state.itemId}`;
+            const data = await queueTodoWrite(state.entryId, () => api(url, {
+              method: 'PATCH', body: JSON.stringify({ content }),
+            }));
+            if (state.itemId == null) {
+              if (entry) entry.content = data.entry.content;
+              // Leave the previous timestamp until refresh updates both metadata and ordering.
+            } else replaceTodoItem(state.entryId, data.item);
+            finishInlineTodoEdit(state, state.itemId == null ? data.entry.content : data.item.content);
+            return true;
+          } catch (error) {
+            state.error.textContent = `${error.message}；再次离开文字可重试，Esc 取消。`;
+            return false;
+          } finally {
+            state.input.removeAttribute('aria-busy');
+            state.saving = null;
+          }
+        })();
+        return state.saving;
+      }
+      async function persistPageTodoOrder(entryId, container, oldIds, focusId = null) {
+        const ids = Array.from(container.children, (row) => Number(row.dataset.itemId));
+        if (JSON.stringify(ids) === JSON.stringify(oldIds)) { resumeTodoSync(); return; }
+        try {
+          const data = await queueTodoWrite(entryId, () => api(`/api/entries/${entryId}/todo-order`, {
+            method: 'PATCH', body: JSON.stringify({ item_ids: ids }),
+          }));
+          entries = entries.map((entry) => entry.id === entryId ? data.entry : entry);
+          const position = focusId ? ids.indexOf(focusId) + 1 : 0;
+          todoDragStatus.textContent = position ? `已移动到第 ${position} 项，共 ${ids.length} 项` : '待办顺序已保存';
+        } catch (error) {
+          const rows = new Map(Array.from(container.children, (row) => [Number(row.dataset.itemId), row]));
+          oldIds.forEach((id) => { if (rows.has(id)) container.append(rows.get(id)); });
+          showToast(error.message, true);
+        }
+        resumeTodoSync();
+      }
+      function attachPageTodoInteractions(row, entryId, itemId, container) {
+        row.dataset.itemId = String(itemId);
+        row.tabIndex = 0;
+        row.setAttribute('aria-label', '点击编辑待办，拖动排序；Alt 加上下方向键也可排序');
+        let suppressClickUntil = 0;
+        const excluded = (target) => target.closest('button, textarea, input, a, [contenteditable]');
+        row.addEventListener('click', (event) => {
+          if (excluded(event.target) || Date.now() < suppressClickUntil) return;
+          beginInlineTodoEdit(entryId, itemId, row, event);
+        });
+        row.addEventListener('keydown', (event) => {
+          if (event.target !== row) return;
+          if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+            event.preventDefault();
+            if (todoInteractionBusy()) return;
+            const oldIds = Array.from(container.children, (node) => Number(node.dataset.itemId));
+            const target = event.key === 'ArrowUp' ? row.previousElementSibling : row.nextElementSibling;
+            if (!target) return;
+            container.insertBefore(row, event.key === 'ArrowUp' ? target : target.nextSibling);
+            row.focus({ preventScroll: true });
+            persistPageTodoOrder(entryId, container, oldIds, itemId);
+          } else if (event.key === 'Enter') {
+            event.preventDefault();
+            beginInlineTodoEdit(entryId, itemId, row);
+          }
+        });
+        row.addEventListener('contextmenu', (event) => {
+          if (!excluded(event.target)) event.preventDefault();
+        });
+        function prepare(x, y, kind) {
+          if (todoInteractionBusy()) return false;
+          todoInteractionEpoch += 1;
+          pageTodoDrag = { row, container, entryId, itemId, kind, x, y, startX: x, startY: y,
+            active: false, timer: 0, frame: 0, ghost: null,
+            oldIds: Array.from(container.children, (node) => Number(node.dataset.itemId)) };
+          return true;
+        }
+        function activate() {
+          const state = pageTodoDrag;
+          if (!state || state.row !== row || state.active) return;
+          state.active = true;
+          const rect = row.getBoundingClientRect();
+          state.ghost = row.cloneNode(true);
+          state.ghost.removeAttribute('tabindex');
+          state.ghost.setAttribute('aria-hidden', 'true');
+          state.ghost.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+          state.ghost.classList.add('todo-page-ghost');
+          Object.assign(state.ghost.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px` });
+          document.body.append(state.ghost);
+          row.classList.add('todo-page-dragging');
+          document.body.classList.add('todo-page-sorting');
+          suppressClickUntil = Date.now() + 1000;
+          state.frame = requestAnimationFrame(tick);
+        }
+        function position() {
+          const state = pageTodoDrag;
+          if (!state?.active) return;
+          state.ghost.style.transform = `translateY(${state.y - state.startY}px)`;
+          const before = Array.from(container.children).find((node) => {
+            if (node === row) return false;
+            const rect = node.getBoundingClientRect();
+            return state.y < rect.top + rect.height / 2;
+          });
+          container.insertBefore(row, before || null);
+        }
+        function tick() {
+          const state = pageTodoDrag;
+          if (!state?.active || state.row !== row) return;
+          const direction = state.y < 70 ? -1 : state.y > innerHeight - 70 ? 1 : 0;
+          if (direction) window.scrollBy(0, direction * 9);
+          position();
+          state.frame = requestAnimationFrame(tick);
+        }
+        function move(x, y) {
+          const state = pageTodoDrag;
+          if (!state || state.row !== row) return;
+          state.x = x; state.y = y;
+          const distance = Math.hypot(x - state.startX, y - state.startY);
+          if (!state.active && state.kind === 'touch' && distance > 10) { finish(false); return; }
+          if (!state.active && state.kind === 'mouse' && distance > 6) activate();
+          position();
+        }
+        function finish(commit) {
+          const state = pageTodoDrag;
+          if (!state || state.row !== row) return;
+          pageTodoDrag = null;
+          clearTimeout(state.timer);
+          cancelAnimationFrame(state.frame);
+          state.ghost?.remove();
+          row.classList.remove('todo-page-dragging');
+          document.body.classList.remove('todo-page-sorting');
+          if (state.active) {
+            suppressClickUntil = Date.now() + 600;
+            if (commit) persistPageTodoOrder(entryId, container, state.oldIds, itemId);
+            else {
+              const rows = new Map(Array.from(container.children, (node) => [Number(node.dataset.itemId), node]));
+              state.oldIds.forEach((id) => container.append(rows.get(id)));
+              resumeTodoSync();
+            }
+          }
+        }
+        row.addEventListener('pointerdown', (event) => {
+          if (event.pointerType === 'touch' || event.button !== 0 || excluded(event.target)) return;
+          if (!prepare(event.clientX, event.clientY, 'mouse')) return;
+          const onMove = (event) => { move(event.clientX, event.clientY); if (pageTodoDrag?.active) event.preventDefault(); };
+          const cleanup = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onCancel);
+            window.removeEventListener('blur', onCancel);
+          };
+          const onUp = () => { cleanup(); finish(true); };
+          const onCancel = () => { cleanup(); finish(false); };
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+          window.addEventListener('pointercancel', onCancel);
+          window.addEventListener('blur', onCancel);
+        });
+        // A non-passive touchmove handler cancels scrolling only after the hold.
+        // Applying touch-action:none to every row would prevent normal page scrolling.
+        row.addEventListener('touchstart', (event) => {
+          if (event.touches.length !== 1 || excluded(event.target)) { finish(false); return; }
+          const touch = event.touches[0];
+          if (prepare(touch.clientX, touch.clientY, 'touch')) pageTodoDrag.timer = setTimeout(activate, 450);
+        }, { passive: true });
+        row.addEventListener('touchmove', (event) => {
+          if (event.touches.length !== 1) { finish(false); return; }
+          const touch = event.touches[0];
+          move(touch.clientX, touch.clientY);
+          if (pageTodoDrag?.active && event.cancelable) event.preventDefault();
+        }, { passive: false });
+        row.addEventListener('touchend', (event) => {
+          if (pageTodoDrag?.active && event.cancelable) event.preventDefault();
+          finish(true);
+        }, { passive: false });
+        row.addEventListener('touchcancel', () => finish(false));
+        window.addEventListener('blur', () => finish(false), { signal: pageTodoListenerController.signal });
+      }
+      let pageTodoListenerController = new AbortController();
+
       function createStagePicker(stage, onChange, label) {
         const picker = document.createElement("div");
         picker.className = "stage-picker";
@@ -2468,20 +2823,25 @@
         const buttons = picker.querySelectorAll("button");
         buttons.forEach((button) => { button.disabled = true; });
         try {
-          const data = await api(`/api/todo-items/${itemId}`, {
+          const data = await queueTodoWrite(entryId, () => api(`/api/todo-items/${itemId}`, {
             method: "PATCH",
             body: JSON.stringify({ stage }),
-          });
+          }));
           const entry = entries.find((candidate) => candidate.id === entryId);
           const item = entry?.items?.find(
             (candidate) => candidate.id === data.item.id,
           );
           if (item) item.stage = data.item.stage;
-          renderEntries({ preserveScroll: true });
+          const row = picker.closest('.todo-item');
+          row?.classList.toggle('completed', data.item.stage === 5);
+          setPickerStage(picker, data.item.stage);
+          buttons.forEach((button) => { button.disabled = false; });
           showToast(stage === 5 ? "待办事项已完成" : `已切换到 Stage ${stage}`);
         } catch (error) {
           buttons.forEach((button) => { button.disabled = false; });
           showToast(error.message, true);
+        } finally {
+          resumeTodoSync();
         }
       }
 
@@ -2902,6 +3262,9 @@
       }
 
       function renderEntries({ preserveScroll = false } = {}) {
+        if (todoInteractionBusy()) return;
+        pageTodoListenerController.abort();
+        pageTodoListenerController = new AbortController();
         const scrollState = preserveScroll ? captureScrollState() : null;
         history.replaceChildren();
         entryCount.textContent = entries.length
@@ -3122,7 +3485,11 @@
             edit.type = "button";
             edit.className = "secondary";
             edit.textContent = "编辑";
-            edit.addEventListener("click", () => openTodoEditor(entry, edit));
+            edit.addEventListener("click", async () => {
+              if (pageTodoDrag || pendingTodoWrites) return;
+              if (inlineTodoEdit && !(await saveInlineTodoEdit())) return;
+              openTodoEditor(entries.find((candidate) => candidate.id === entry.id), edit);
+            });
             actions.append(edit, pin, remove);
             meta.append(metaLeft, actions);
 
@@ -3143,6 +3510,7 @@
                 },
                 `为“${item.content}”选择 Stage`,
               );
+              attachPageTodoInteractions(itemNode, entry.id, item.id, todoContent);
               itemNode.append(text, picker);
               todoContent.append(itemNode);
             }
@@ -3170,9 +3538,15 @@
             content.dataset.entryId = String(entry.id);
             content.textContent = entry.content;
 
-            edit.addEventListener("click", () =>
-              startEntryEdit(entry, content, edit),
-            );
+            content.tabIndex = 0;
+            content.addEventListener("click", (event) => beginOriginalEdit(entry.id, null, content, null, event));
+            content.addEventListener("keydown", (event) => {
+              if (event.target === content && !content.isContentEditable && event.key === "Enter") {
+                event.preventDefault();
+                beginOriginalEdit(entry.id, null, content);
+              }
+            });
+            edit.addEventListener("click", () => beginOriginalEdit(entry.id, null, content));
 
             actions.append(edit, copy, pin, remove);
             meta.append(metaLeft, actions);
@@ -3184,14 +3558,18 @@
       }
 
       async function loadEntries({ silent = false, force = false } = {}) {
+        if (todoInteractionBusy()) return false;
+        const epoch = todoInteractionEpoch;
         try {
           const data = await api("/api/entries");
+          if (todoInteractionBusy() || epoch !== todoInteractionEpoch) return false;
           setServerStatus(true);
           if (!force && entriesAreEqual(data.entries)) return true;
           entries = data.entries;
           renderEntries({ preserveScroll: true });
           return true;
         } catch (error) {
+          if (todoInteractionBusy() || epoch !== todoInteractionEpoch) return false;
           if (!silent) {
             history.innerHTML = "";
             const message = document.createElement("div");
@@ -3459,25 +3837,27 @@
       function insertPlainText(text) {
         const range = currentEditorRange();
         range.deleteContents();
-        const fragment = document.createDocumentFragment();
-        const lines = text.replace(/\r\n?/g, "\n").split("\n");
-        let lastNode = null;
-        lines.forEach((line, index) => {
-          if (line) {
-            lastNode = document.createTextNode(line);
-            fragment.append(lastNode);
-          }
-          if (index < lines.length - 1) {
-            lastNode = document.createElement("br");
-            fragment.append(lastNode);
-          }
-        });
-        if (!lastNode) {
-          lastNode = document.createTextNode("");
-          fragment.append(lastNode);
+        const normalizedText = text.replace(/\r\n?/g, "\n");
+        if (!normalizedText) return;
+        const insertionText = normalizedText.endsWith("\n")
+          ? `${normalizedText}${EDITOR_CARET_ANCHOR}`
+          : normalizedText;
+        if (range.startContainer.nodeType === Node.TEXT_NODE) {
+          const textNode = range.startContainer;
+          const insertionOffset = range.startOffset;
+          textNode.insertData(insertionOffset, insertionText);
+          range.setStart(
+            textNode,
+            insertionOffset + insertionText.length,
+          );
+          range.collapse(true);
+          selectRange(range);
+          updateCounter();
+          return;
         }
-        range.insertNode(fragment);
-        range.setStartAfter(lastNode);
+        const textNode = document.createTextNode(insertionText);
+        range.insertNode(textNode);
+        range.setStart(textNode, textNode.data.length);
         range.collapse(true);
         selectRange(range);
         updateCounter();
@@ -3549,26 +3929,10 @@
       }
 
       function appendPlainText(parent, text) {
-        const fragment = document.createDocumentFragment();
-        const lines = text.split("\n");
-        let firstNode = null;
-        let lastNode = null;
-        lines.forEach((line, index) => {
-          if (line) {
-            const textNode = document.createTextNode(line);
-            firstNode ||= textNode;
-            lastNode = textNode;
-            fragment.append(textNode);
-          }
-          if (index < lines.length - 1) {
-            const lineBreak = document.createElement("br");
-            firstNode ||= lineBreak;
-            lastNode = lineBreak;
-            fragment.append(lineBreak);
-          }
-        });
-        parent.append(fragment);
-        return { firstNode, lastNode };
+        if (!text) return { firstNode: null, lastNode: null };
+        const textNode = document.createTextNode(text);
+        parent.append(textNode);
+        return { firstNode: textNode, lastNode: textNode };
       }
 
       function canvasToBlob(canvas, type, quality) {
@@ -4000,16 +4364,62 @@
         rememberCaret();
         updateCounter();
       });
+      editor.addEventListener("compositionstart", () => {
+        editorIsComposing = true;
+      });
+      editor.addEventListener("compositionend", () => {
+        editorIsComposing = false;
+        rememberCaret();
+        updateCounter();
+      });
       editor.addEventListener("keydown", (event) => {
         if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          if (event.isComposing || editorIsComposing || event.keyCode === 229) {
+            return;
+          }
           event.preventDefault();
           saveEntry();
           return;
         }
         if (event.key === "Enter") {
+          if (event.isComposing || editorIsComposing || event.keyCode === 229) {
+            return;
+          }
           event.preventDefault();
           insertPlainText("\n");
           return;
+        }
+        if (
+          ["Backspace", "Delete"].includes(event.key) &&
+          !event.isComposing &&
+          !editorIsComposing
+        ) {
+          const range = currentEditorRange();
+          if (
+            range.collapsed &&
+            range.startContainer.nodeType === Node.TEXT_NODE
+          ) {
+            const textNode = range.startContainer;
+            const offset = range.startOffset;
+            const deletingBackward =
+              event.key === "Backspace" &&
+              textNode.data[offset - 1] === EDITOR_CARET_ANCHOR &&
+              textNode.data[offset - 2] === "\n";
+            const deletingForward =
+              event.key === "Delete" &&
+              textNode.data[offset] === "\n" &&
+              textNode.data[offset + 1] === EDITOR_CARET_ANCHOR;
+            if (deletingBackward || deletingForward) {
+              event.preventDefault();
+              const deletionOffset = deletingBackward ? offset - 2 : offset;
+              textNode.deleteData(deletionOffset, 2);
+              range.setStart(textNode, deletionOffset);
+              range.collapse(true);
+              selectRange(range);
+              updateCounter();
+              return;
+            }
+          }
         }
         if (
           (event.ctrlKey || event.metaKey) &&
@@ -4019,6 +4429,16 @@
         }
       });
       editor.addEventListener("beforeinput", (event) => {
+        if (
+          event.cancelable &&
+          !event.isComposing &&
+          !editorIsComposing &&
+          ["insertParagraph", "insertLineBreak"].includes(event.inputType)
+        ) {
+          event.preventDefault();
+          insertPlainText("\n");
+          return;
+        }
         if (event.inputType.startsWith("format")) {
           event.preventDefault();
         }
@@ -4190,7 +4610,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=37", {
+            .register("/service-worker.js?v=40", {
               updateViaCache: "none",
             })
             .then(async (registration) => {
