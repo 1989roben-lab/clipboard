@@ -93,6 +93,34 @@ class TodoInlineTests(unittest.TestCase):
         self.server.json_call(f"/api/entries/{text['id']}/todo-order", 'PATCH', {'item_ids': self.ids}, 400)
         self.server.json_call('/api/entries/999999/todo-order', 'PATCH', {'item_ids': self.ids}, 404)
 
+    def test_structure_split_insert_delete_and_conflicts(self):
+        path = self.item_path + '/structure'
+        self.server.json_call(self.item_path, 'PATCH', {'stage': 5})
+        result = self.server.json_call(path, 'PATCH', {'action': 'split', 'expected': '一', 'before': '前', 'after': '后'})
+        items = result['entry']['items']
+        self.assertEqual([(i['content'], i['stage']) for i in items], [('前', 5), ('后', 1), ('二', 1), ('三', 1)])
+        self.assertEqual(items[0]['id'], self.ids[0])
+        self.assertEqual(result['entry']['updated_at'], self.entry['updated_at'])
+        self.server.json_call(path, 'PATCH', {'action': 'delete', 'expected': '一'}, 409)
+        self.assertEqual(self.read(), result['entry'])
+        inserted = self.server.json_call(path, 'PATCH', {'action': 'insert', 'side': 'before', 'content': '新'})['entry']
+        self.assertEqual(inserted['items'][0]['content'], '新')
+        self.server.json_call(path, 'PATCH', {'action': 'insert', 'side': 'after', 'content': 'x' * 204800}, 413)
+        self.server.json_call(path, 'PATCH', {'action': 'insert', 'side': 'after', 'content': ' '}, 400)
+        self.assertEqual(self.read(), inserted)
+        self.server.stop()
+        self.server.start()
+        self.assertEqual(self.read(), inserted)
+        for item in inserted['items']:
+            result = self.server.json_call(f"/api/todo-items/{item['id']}/structure", 'PATCH', {'action': 'delete', 'expected': item['content']})
+        self.assertIsNone(result['entry'])
+        self.assertNotIn(self.entry['id'], [e['id'] for e in self.server.json_call('/api/entries')['entries']])
+
+    def test_structure_boundary_split_preserves_item(self):
+        for before, after in [('', '一'), ('一', '')]:
+            result = self.server.json_call(self.item_path + '/structure', 'PATCH', {'action': 'split', 'expected': '一', 'before': before, 'after': after})
+            self.assertEqual(result['entry'], self.entry)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -67,6 +67,7 @@ FILE_UPLOAD_TTL_SECONDS = 24 * 60 * 60
 ENTRY_PATH = re.compile(r"^/api/entries/([1-9][0-9]*)$")
 TODO_ORDER_PATH = re.compile(r"^/api/entries/([1-9][0-9]*)/todo-order$")
 TODO_ITEM_PATH = re.compile(r"^/api/todo-items/([1-9][0-9]*)$")
+TODO_STRUCTURE_PATH = re.compile(r"^/api/todo-items/([1-9][0-9]*)/structure$")
 IMAGE_PATH = re.compile(
     r"^/api/images/([1-9][0-9]*)(/download)?$"
 )
@@ -552,6 +553,10 @@ class ClipboardHandler(BaseHTTPRequestHandler):
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "未找到该接口"})
 
     def do_PATCH(self) -> None:
+        structure_match = TODO_STRUCTURE_PATH.fullmatch(self.path)
+        if structure_match:
+            self.change_todo_structure(int(structure_match.group(1)))
+            return
         order_match = TODO_ORDER_PATH.fullmatch(self.path)
         if order_match:
             self.update_todo_order(int(order_match.group(1)))
@@ -1014,6 +1019,57 @@ class ClipboardHandler(BaseHTTPRequestHandler):
             )
             result = public_entry(entry, connection)
         self.send_json(HTTPStatus.OK, {"entry": result})
+
+    def change_todo_structure(self, item_id: int) -> None:
+        payload = self.read_json_body()
+        if payload is None:
+            return
+        action = payload.get("action")
+        if action not in ("split", "delete", "insert"):
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "无效的待办操作"})
+            return
+        parts = [payload.get("before"), payload.get("after")] if action == "split" else [payload.get("content")] if action == "insert" else []
+        if any(not isinstance(part, str) for part in parts) or (action == "insert" and (not parts[0].strip() or payload.get("side") not in ("before", "after"))):
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "待办内容或插入位置无效"})
+            return
+        parts = [part.strip() for part in parts]
+        with connect_db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM todo_items WHERE id = ?", (item_id,)).fetchone()
+            if row is None:
+                self.send_json(HTTPStatus.CONFLICT, {"error": "待办已变化，请取消编辑并刷新后重试"})
+                return
+            if action != "insert" and payload.get("expected") != row["content"]:
+                self.send_json(HTTPStatus.CONFLICT, {"error": "待办内容已在别处修改，请取消编辑并刷新后重试"})
+                return
+            entry_id = row["entry_id"]
+            rows = connection.execute("SELECT * FROM todo_items WHERE entry_id = ? ORDER BY position, id", (entry_id,)).fetchall()
+            total = sum(len(item["content"].encode("utf-8")) for item in rows)
+            total += sum(len(part.encode("utf-8")) for part in parts) - (len(row["content"].encode("utf-8")) if action != "insert" else 0)
+            if total > MAX_CONTENT_BYTES:
+                self.send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "待办项目合计不能超过 200 KB"})
+                return
+            ids = [item["id"] for item in rows]
+            index = ids.index(item_id)
+            focus_id = item_id
+            if action == "delete" or (action == "split" and not any(parts)):
+                connection.execute("DELETE FROM todo_items WHERE id = ?", (item_id,))
+                ids.remove(item_id)
+            elif action == "split":
+                connection.execute("UPDATE todo_items SET content = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?", (parts[0] or parts[1], item_id))
+                if all(parts):
+                    focus_id = connection.execute("INSERT INTO todo_items (entry_id, content, stage, position) VALUES (?, ?, 1, 0)", (entry_id, parts[1])).lastrowid
+                    ids.insert(index + 1, focus_id)
+            else:
+                focus_id = connection.execute("INSERT INTO todo_items (entry_id, content, stage, position) VALUES (?, ?, 1, 0)", (entry_id, parts[0])).lastrowid
+                ids.insert(index + (payload["side"] == "after"), focus_id)
+            connection.executemany("UPDATE todo_items SET position = ? WHERE id = ?", enumerate(ids))
+            if not ids:
+                connection.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+                result = None
+            else:
+                result = public_entry(connection.execute("SELECT * FROM entries WHERE id = ?", (entry_id,)).fetchone(), connection)
+        self.send_json(HTTPStatus.OK, {"entry": result, "focus_id": focus_id})
 
     def update_todo_stage(self, item_id: int) -> None:
         # Partial item updates preserve fields changed by other clients.
