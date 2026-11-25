@@ -753,6 +753,17 @@
         font: inherit;
         line-height: 1.65;
       }
+      .leading-text-slot {
+        position: relative;
+        min-height: 1.65em;
+        cursor: text;
+      }
+      .leading-text-slot[data-empty="true"]::before {
+        position: absolute;
+        color: #75808d;
+        content: "点这里，在第一张图片前输入文字";
+        pointer-events: none;
+      }
       .mixed-inline-editor .inline-draft-image {
         width: 100%;
         margin: 16px 0;
@@ -2133,6 +2144,11 @@
           children.forEach((node, index) => {
             if (
               node.nodeType === Node.ELEMENT_NODE &&
+              node.classList.contains("leading-text-slot") &&
+              !node.textContent.replaceAll(EDITOR_CARET_ANCHOR, "").trim()
+            ) return;
+            if (
+              node.nodeType === Node.ELEMENT_NODE &&
               node.classList.contains("inline-draft-image")
             ) {
               images.push({ id: node.dataset.imageId, position: Array.from(content).length });
@@ -2699,6 +2715,26 @@
         editable.setAttribute('aria-label', '编辑记忆，离开时自动保存');
         editable.spellcheck = true;
         const characters = Array.from(entry.content || '');
+        if (entry.images?.[0]?.position === 0) {
+          const leading = document.createElement('div');
+          leading.className = 'leading-text-slot';
+          leading.dataset.empty = 'true';
+          leading.append(document.createElement('br'));
+          leading.addEventListener('click', () => {
+            if (leading.dataset.empty !== 'true') return;
+            editable.focus();
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.setStart(leading, 0);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          });
+          editable.append(leading);
+          editable.addEventListener('input', () => {
+            leading.dataset.empty = String(!leading.textContent.trim());
+          });
+        }
         let offset = 0;
         for (const image of entry.images || []) {
           const next = Math.max(offset, Math.min(image.position, characters.length));
@@ -4294,10 +4330,16 @@
 
       function rangeAtTextOffset(root, offset) {
         const range = document.createRange();
+        const leading = root.querySelector(':scope > .leading-text-slot');
+        if (offset === 0 && leading) {
+          range.setStart(leading, 0);
+          range.collapse(true);
+          return range;
+        }
         let remaining = Math.max(0, offset);
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
           acceptNode(node) {
-            return node.parentElement?.closest('.inline-draft-image')
+            return node.parentElement?.closest('.inline-draft-image, .leading-text-slot')
               ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
           },
         });
@@ -4980,7 +5022,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=46", {
+            .register("/service-worker.js?v=47", {
               updateViaCache: "none",
             })
             .then(async (registration) => {
