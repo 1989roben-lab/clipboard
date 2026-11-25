@@ -677,57 +677,92 @@
         padding: 14px;
       }
 
-      .image-preview-link {
-        display: grid;
-        overflow: hidden;
-        width: 100%;
-        min-height: 180px;
-        max-height: 520px;
-        place-items: center;
-        border-radius: 12px;
+      .entry.image-document {
+        overflow: visible;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+      }
+
+      .image-document .entry-meta {
+        justify-content: flex-end;
+        padding: 0 2px 10px;
+        border: 0;
+        background: transparent;
+      }
+
+      .image-document .entry-actions {
+        gap: 4px;
+      }
+
+      .image-document .entry-actions button {
+        background: transparent;
+        box-shadow: none;
+      }
+
+      .image-document .entry-actions button:hover {
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      .image-document .image-content,
+      .image-document > .mixed-inline-editor {
+        min-height: 160px;
+        padding: clamp(18px, 4vw, 38px);
+        border-radius: 10px;
         background: #fff;
+        box-shadow: 0 8px 30px rgba(52, 72, 96, 0.08);
+        line-height: 1.65;
+        overflow-wrap: anywhere;
+      }
+
+      .document-image {
+        display: block;
+        width: 100%;
+        margin: 16px 0;
+        cursor: text;
       }
 
       .image-preview {
         display: block;
-        width: 100%;
+        width: auto;
+        max-width: 100%;
         max-height: 520px;
+        margin-inline: auto;
         object-fit: contain;
       }
 
-      .image-details {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        padding: 12px 3px 1px;
-      }
-
       .image-caption {
-        max-height: 260px;
-        margin: 12px 0;
-        padding: 13px 14px;
-        border: 1px solid #e1e7e2;
-        border-radius: 10px;
-        background: #f7f9f7;
+        overflow: visible;
+        max-height: none;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        font: inherit;
       }
 
-      .image-caption.before-image {
-        margin-top: 0;
-      }
-
-      .image-caption { cursor: text; white-space: pre-wrap; }
+      .image-caption { cursor: text; white-space: pre-wrap; overflow-wrap: anywhere; }
       .mixed-inline-editor {
-        min-height: 96px;
-        padding: 18px;
-        outline: 2px solid rgba(0, 122, 255, 0.45);
+        outline: 2px solid rgba(0, 122, 255, 0.28);
         outline-offset: -2px;
-        border-radius: 12px;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         font: inherit;
+        line-height: 1.65;
       }
-      .mixed-inline-editor .inline-draft-image { margin: 12px 0; }
+      .mixed-inline-editor .inline-draft-image {
+        width: 100%;
+        margin: 16px 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      .mixed-inline-editor .inline-draft-image img {
+        max-height: 520px;
+        border-radius: 0;
+      }
       .mixed-edit-error { display: block; padding: 8px 18px 14px; color: var(--danger); }
 
       .file-name {
@@ -2531,34 +2566,22 @@
         for (const image of entry.images || []) {
           const position = Math.max(offset, Math.min(image.position, characters.length));
           appendText(characters.slice(offset, position).join(''), offset);
-          const link = document.createElement('a');
-          link.className = 'image-preview-link';
-          link.href = mixedImageUrl(entry, image);
-          link.target = '_blank';
-          link.rel = 'noopener';
-          link.setAttribute('aria-label', `查看原图：${image.filename || '图片'}`);
+          const imageBlock = document.createElement('div');
+          imageBlock.className = 'document-image';
+          imageBlock.tabIndex = 0;
+          imageBlock.setAttribute('role', 'button');
+          imageBlock.setAttribute('aria-label', `编辑图片附近的内容：${image.filename || '图片'}`);
+          imageBlock.addEventListener('click', () => startMixedEdit(entry, root, editButton, position));
+          imageBlock.addEventListener('keydown', event => {
+            if (event.key === 'Enter') { event.preventDefault(); startMixedEdit(entry, root, editButton, position); }
+          });
           const preview = document.createElement('img');
           preview.className = 'image-preview';
-          preview.src = link.href;
+          preview.src = mixedImageUrl(entry, image);
           preview.alt = image.filename || '图片';
           preview.loading = 'lazy';
-          link.append(preview);
-          const details = document.createElement('div');
-          details.className = 'image-details';
-          const info = document.createElement('div');
-          const name = document.createElement('p');
-          name.className = 'file-name';
-          name.textContent = image.filename || '图片';
-          const size = document.createElement('span');
-          size.className = 'file-size';
-          size.textContent = formatBytes(image.size_bytes || 0);
-          info.append(name, size);
-          const download = document.createElement('a');
-          download.className = 'secondary-link';
-          download.href = mixedImageUrl(entry, image, true);
-          download.textContent = '下载';
-          details.append(info, download);
-          root.append(link, details);
+          imageBlock.append(preview);
+          root.append(imageBlock);
           offset = position;
         }
         appendText(characters.slice(offset).join(''), offset);
@@ -3679,7 +3702,7 @@
 
         for (const entry of visibleEntries) {
           const article = document.createElement("article");
-          article.className = "entry";
+          article.className = entry.type === "image" ? "entry image-document" : "entry";
 
           const meta = document.createElement("div");
           meta.className = "entry-meta";
@@ -3742,13 +3765,8 @@
               actions.append(copy);
             }
 
-            const download = document.createElement("a");
-            download.className = "secondary-link";
-            download.href = `/api/images/${entry.id}/download`;
-            download.textContent = "下载";
-
-            actions.append(download, pin, remove);
-            meta.append(metaLeft, actions);
+            actions.append(pin, remove);
+            meta.append(actions);
 
             const imageContent = document.createElement("div");
             imageContent.className = "image-content";
@@ -4962,7 +4980,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=41", {
+            .register("/service-worker.js?v=46", {
               updateViaCache: "none",
             })
             .then(async (registration) => {

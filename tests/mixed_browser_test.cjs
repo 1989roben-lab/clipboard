@@ -51,6 +51,24 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     await page.keyboard.type('第三段\n第四段');
     await page.locator('#save-button').click();
     await page.waitForFunction(() => document.querySelectorAll('#history .image-preview').length === 2);
+    const documentView = page.locator('#history .image-document').first();
+    assert.equal(await documentView.locator('.document-image').count(), 2);
+    assert.equal(await documentView.locator('.image-details, .kind-badge, time').count(), 0);
+    assert.equal(await documentView.getByText('下载', {exact:true}).count(), 0);
+    assert.equal(await documentView.getByText('first.png', {exact:true}).count(), 0);
+    assert.equal(await documentView.getByText('second.png', {exact:true}).count(), 0);
+    const readingStyle = await documentView.locator('.image-content').evaluate(node => ({
+      background: getComputedStyle(node).backgroundColor,
+      padding: getComputedStyle(node).paddingLeft,
+    }));
+    await documentView.locator('.document-image').first().click();
+    await documentView.locator('.mixed-inline-editor').waitFor();
+    const editingStyle = await documentView.locator('.mixed-inline-editor').evaluate(node => ({
+      background: getComputedStyle(node).backgroundColor,
+      padding: getComputedStyle(node).paddingLeft,
+    }));
+    assert.deepEqual(editingStyle, readingStyle);
+    await documentView.locator('.mixed-inline-editor').press('Escape');
     let saved = (await (await fetch(base+'/api/entries')).json()).entries[0];
     assert.equal(saved.images.length, 2);
     assert.match(saved.content, /第一段/);
@@ -121,6 +139,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     await phone.goto(base);
     await phone.waitForFunction(() => document.querySelectorAll('#history .image-preview').length === 6);
     assert(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    if (process.env.MIXED_SCREENSHOT_PATH) await phone.locator('.image-document').first().screenshot({path:process.env.MIXED_SCREENSHOT_PATH});
     await phone.close();
     console.log('PASS: multi-image text flow, inline blur save, refresh, mobile width, no clear-all request');
   } finally {
