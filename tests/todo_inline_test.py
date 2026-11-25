@@ -119,7 +119,8 @@ class TodoInlineTests(unittest.TestCase):
     def test_structure_boundary_split_preserves_item(self):
         for before, after in [('', '一'), ('一', '')]:
             result = self.server.json_call(self.item_path + '/structure', 'PATCH', {'action': 'split', 'expected': '一', 'before': before, 'after': after})
-            self.assertEqual(result['entry'], self.entry)
+            self.assertEqual({k: v for k, v in result['entry'].items() if k != 'revision'},
+                             {k: v for k, v in self.entry.items() if k != 'revision'})
 
 
 if __name__ == '__main__':

@@ -9,6 +9,9 @@ import json
 import os
 import socket
 import sqlite3
+import atexit
+import uuid
+from pymongo import MongoClient
 import subprocess
 import sys
 import tempfile
@@ -67,6 +70,18 @@ def free_port() -> int:
 class TestServer:
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
+        from urllib.parse import urlsplit, urlunsplit
+        source = os.environ['TEST_MONGO_URI']
+        self.database_name = 'memory_test_' + uuid.uuid4().hex
+        url = urlsplit(source)
+        self.mongo_uri = urlunsplit(url._replace(path='/' + self.database_name))
+        self.mongo = MongoClient(self.mongo_uri)
+        self.db = self.mongo.get_default_database()
+        def cleanup():
+            assert self.database_name.startswith('memory_test_')
+            self.mongo.drop_database(self.database_name)
+            self.mongo.close()
+        atexit.register(cleanup)
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.process: subprocess.Popen[bytes] | None = None
@@ -75,7 +90,8 @@ class TestServer:
         environment = os.environ.copy()
         environment.update(
             {
-                "DB_PATH": str(self.data_dir / "clipboard.db"),
+                "DATA_DIR": str(self.data_dir),
+                "MONGO_URI": self.mongo_uri,
                 "HOST": "127.0.0.1",
                 "PORT": str(self.port),
             }
@@ -248,6 +264,12 @@ def main() -> None:
                 ("legacy entry", legacy_created_at),
             )
         legacy_server = TestServer(legacy_root)
+        from scripts.migrate_sqlite import migrate
+        from memory.storage import Repository
+        (legacy_root / 'uploads').mkdir()
+        legacy_repo = Repository(legacy_server.mongo_uri)
+        migrate(legacy_root / 'clipboard.db', legacy_root / 'uploads', legacy_repo)
+        legacy_repo.client.close()
         legacy_server.start()
         try:
             migrated = legacy_server.json_call("/api/entries")["entries"]
@@ -256,7 +278,7 @@ def main() -> None:
             with sqlite3.connect(
                 legacy_root / "clipboard.db"
             ) as connection:
-                assert "pinned_at" in {
+                assert "pinned_at" not in {
                     row[1]
                     for row in connection.execute(
                         "PRAGMA table_info(entries)"
@@ -401,7 +423,7 @@ def main() -> None:
             assert page_headers.get_content_type() == "text/html"
             assert page_headers["Cache-Control"] == "no-store, max-age=0"
             versioned_page, versioned_page_headers = server.call(
-                "/?app=v42"
+                "/?app=v45"
             )
             assert versioned_page == page
             assert (
@@ -415,7 +437,7 @@ def main() -> None:
             manifest = json.loads(manifest_body)
             assert manifest["display"] == "standalone"
             assert manifest["name"] == "Memory"
-            assert manifest["start_url"] == "/?app=v42"
+            assert manifest["start_url"] == "/?app=v45"
             assert all("?v=14" in icon["src"] for icon in manifest["icons"])
             assert {icon["sizes"] for icon in manifest["icons"]} >= {
                 "192x192",
@@ -434,8 +456,8 @@ def main() -> None:
             worker_text = worker.decode("utf-8")
             assert 'url.pathname.startsWith("/api/")' in worker_text
             assert 'request.mode === "navigate"' in worker_text
-            assert '.catch(() => caches.match("/?app=v42"))' in worker_text
-            assert 'memory-shell-v42' in worker_text
+            assert '.catch(() => caches.match("/?app=v45"))' in worker_text
+            assert 'memory-shell-v45' in worker_text
             assert 'ACTIVATE_UPDATE' in worker_text
             assert worker_headers.get_content_type() == "application/javascript"
             assert worker_headers["Cache-Control"] == "no-cache"
@@ -627,26 +649,15 @@ def main() -> None:
             assert pinned_todo["updated_at"] == edited_todo["updated_at"]
             assert pinned_todo["items"][0]["stage"] == 4
 
-            with sqlite3.connect(root / "clipboard.db") as connection:
-                pin_text_pinned_at = connection.execute(
-                    "SELECT pinned_at FROM entries WHERE id = ?",
-                    (pin_text["id"],),
-                ).fetchone()[0]
-                oldest_pin_time = connection.execute(
-                    "SELECT pinned_at FROM entries WHERE id = ?",
-                    (created[0]["id"],),
-                ).fetchone()[0]
+            pin_text_pinned_at = server.db.entries.find_one({'_id': pin_text['id']})['pinned_at']
+            oldest_pin_time = server.db.entries.find_one({'_id': created[0]['id']})['pinned_at']
             idempotent_pin = server.json_call(
                 f"/api/entries/{pin_text['id']}",
                 "PATCH",
                 {"pinned": True},
             )["entry"]
             assert idempotent_pin["updated_at"] == pin_text["updated_at"]
-            with sqlite3.connect(root / "clipboard.db") as connection:
-                assert connection.execute(
-                    "SELECT pinned_at FROM entries WHERE id = ?",
-                    (pin_text["id"],),
-                ).fetchone()[0] == pin_text_pinned_at
+            assert server.db.entries.find_one({'_id': pin_text['id']})['pinned_at'] == pin_text_pinned_at
 
             time.sleep(0.01)
             edited_pinned = server.json_call(
@@ -656,11 +667,7 @@ def main() -> None:
             )["entry"]
             assert edited_pinned["pinned"] is True
             assert edited_pinned["updated_at"] > created[0]["updated_at"]
-            with sqlite3.connect(root / "clipboard.db") as connection:
-                assert connection.execute(
-                    "SELECT pinned_at FROM entries WHERE id = ?",
-                    (created[0]["id"],),
-                ).fetchone()[0] == oldest_pin_time
+            assert server.db.entries.find_one({'_id': created[0]['id']})['pinned_at'] == oldest_pin_time
             assert [
                 entry["id"]
                 for entry in server.json_call("/api/entries")["entries"][:4]
@@ -695,10 +702,7 @@ def main() -> None:
             server.json_call(f"/api/entries/{pin_text['id']}", "DELETE")
             server.json_call(f"/api/entries/{todo['id']}", "DELETE")
             server.json_call(f"/api/entries/{other_todo['id']}", "DELETE")
-            with sqlite3.connect(root / "clipboard.db") as connection:
-                remaining_todo_items = connection.execute(
-                    "SELECT COUNT(*) FROM todo_items"
-                ).fetchone()[0]
+            remaining_todo_items = sum(len(d.get('items', [])) for d in server.db.entries.find({}))
             assert remaining_todo_items == 0
             assert len(server.json_call("/api/entries")["entries"]) == 5
 
@@ -863,10 +867,7 @@ def main() -> None:
             assert cleared["deleted"] == 5
             assert cleared["cancelled_uploads"] == 1
             assert not list((root / "uploads").iterdir())
-            with sqlite3.connect(root / "clipboard.db") as connection:
-                assert connection.execute(
-                    "SELECT COUNT(*) FROM todo_items"
-                ).fetchone()[0] == 0
+            assert sum(len(d.get('items', [])) for d in server.db.entries.find({})) == 0
 
             old_image = server.upload(
                 "test.png",
@@ -946,23 +947,10 @@ def main() -> None:
             assert len(retained_entries) == 100
             assert retained_entries[0]["id"] == pruned_todo["id"]
             assert retained_entries[0]["pinned"] is True
-            with sqlite3.connect(root / "clipboard.db") as connection:
-                assert connection.execute(
-                    "SELECT COUNT(*) FROM todo_items"
-                ).fetchone()[0] == 1
-                entry_ids = [
-                    row[0]
-                    for row in connection.execute(
-                        "SELECT id FROM entries ORDER BY id"
-                    ).fetchall()
-                ]
-                connection.executemany(
-                    "UPDATE entries SET pinned_at = ? WHERE id = ?",
-                    [
-                        (f"2026-01-01T00:00:00.{index:03d}Z", entry_id)
-                        for index, entry_id in enumerate(entry_ids)
-                    ],
-                )
+            assert sum(len(d.get('items', [])) for d in server.db.entries.find({})) == 1
+            entry_ids = [d['id'] for d in server.db.entries.find({}).sort('id', 1)]
+            for index, entry_id in enumerate(entry_ids):
+                server.db.entries.update_one({'_id': entry_id}, {'$set': {'pinned_at': f'2026-01-01T00:00:00.{index:03d}Z'}})
             oldest_pinned_id = entry_ids[0]
             newcomer = server.json_call(
                 "/api/entries",
@@ -980,10 +968,7 @@ def main() -> None:
                 entry["id"] != oldest_pinned_id
                 for entry in after_all_pinned
             )
-            with sqlite3.connect(root / "clipboard.db") as connection:
-                assert connection.execute(
-                    "SELECT COUNT(*) FROM todo_items"
-                ).fetchone()[0] == 0
+            assert sum(len(d.get('items', [])) for d in server.db.entries.find({})) == 0
             print(
                 json.dumps(
                     {

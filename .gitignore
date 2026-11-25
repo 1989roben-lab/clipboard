@@ -24,3 +24,12 @@
 !tests/integration_test.py
 !tests/todo_inline_test.py
 !tests/todo_browser_test.cjs
+
+!requirements.txt
+!memory/
+!memory/*.py
+!scripts/
+!scripts/*.py
+!tests/test_*.py
+!tests/search_browser_test.cjs
+!tests/mixed_browser_test.cjs

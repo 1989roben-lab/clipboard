@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOST=0.0.0.0 \
     PORT=8016 \
-    DB_PATH=/data/clipboard.db
+    DATA_DIR=/data
 
 RUN addgroup -S app \
     && adduser -S -G app app \
@@ -12,6 +12,10 @@ RUN addgroup -S app \
     && chown -R app:app /app /data
 
 WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY --chown=app:app memory/ /app/memory/
+COPY --chown=app:app scripts/ /app/scripts/
 COPY --chown=app:app server.py /app/server.py
 COPY --chown=app:app static/ /app/static/
 

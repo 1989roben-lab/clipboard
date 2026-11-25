@@ -12,3 +12,10 @@ README.md
 # Exclude nested desktop metadata and local backups from the image.
 **/._*
 **/*.bak*
+
+.venv
+.test-deps
+.secrets
+.env*
+backups
+tests

@@ -716,6 +716,20 @@
         margin-top: 0;
       }
 
+      .image-caption { cursor: text; white-space: pre-wrap; }
+      .mixed-inline-editor {
+        min-height: 96px;
+        padding: 18px;
+        outline: 2px solid rgba(0, 122, 255, 0.45);
+        outline-offset: -2px;
+        border-radius: 12px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font: inherit;
+      }
+      .mixed-inline-editor .inline-draft-image { margin: 12px 0; }
+      .mixed-edit-error { display: block; padding: 8px 18px 14px; color: var(--danger); }
+
       .file-name {
         overflow: hidden;
         margin: 0 0 3px;
@@ -1726,6 +1740,11 @@
         .todo-mode-button { grid-column: auto; }
         .composer-tools .hint { grid-column: 1 / -1; }
       }
+      .memory-search { display:flex; gap:10px; align-items:center; margin:0 0 18px; }
+      .memory-search input { flex:1; min-width:0; width:100%; padding:12px 14px; font:inherit; color:inherit; background:rgba(255,255,255,.7); border:1px solid rgba(100,116,139,.25); border-radius:12px; }
+      .memory-search input:focus { outline:2px solid #779b90; outline-offset:2px; }
+      .memory-search button { flex-shrink:0; }
+      [hidden] { display:none !important; }
     </style>
   </head>
   <body>
@@ -1848,6 +1867,11 @@
           <button class="danger" id="clear-button" type="button" disabled>
             清空全部
           </button>
+        </div>
+        <div class="memory-search" role="search" aria-label="搜索记忆">
+          <label class="visually-hidden" for="memory-search">搜索正文、待办、说明和文件名</label>
+          <input id="memory-search" type="search" maxlength="200" autocomplete="off" placeholder="搜索记忆、待办或文件名…" />
+          <button id="clear-search" class="secondary" type="button" hidden>清除搜索</button>
         </div>
         <div class="history" id="history" aria-live="polite">
           <div class="loading">正在读取记忆……</div>
@@ -2005,7 +2029,34 @@
       let toastTimer;
       let deferredInstallPrompt = null;
       let entries = [];
+      const searchInput = document.querySelector('#memory-search');
+      const clearSearch = document.querySelector('#clear-search');
+      let searchTimer, searchComposing = false, entryRequestSequence = 0;
+      function searchQuery() { return searchInput.value.trim(); }
+      function matchesSearch(entry) {
+        const terms = searchQuery().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+        const fields = [entry.content || '', entry.filename || '', ...(entry.items || []).map(item => item.content)].map(value => value.toLocaleLowerCase());
+        return terms.every(term => fields.some(field => field.includes(term)));
+      }
+      function scheduleSearch() {
+        clearTimeout(searchTimer);
+        entryRequestSequence++;
+        clearSearch.hidden = !searchInput.value;
+        clearButton.hidden = Boolean(searchQuery());
+        if (searchComposing) return;
+        searchTimer = setTimeout(() => loadEntries({ force:true }), 250);
+      }
+      searchInput.addEventListener('input', scheduleSearch);
+      searchInput.addEventListener('compositionstart', () => { searchComposing = true; clearTimeout(searchTimer); });
+      searchInput.addEventListener('compositionend', () => { searchComposing = false; scheduleSearch(); });
+      clearSearch.addEventListener('click', () => { searchInput.value = ''; scheduleSearch(); searchInput.focus(); });
+      searchInput.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !event.isComposing) { searchInput.value = ''; scheduleSearch(); }
+        if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); clearTimeout(searchTimer); loadEntries({force:true}); }
+      });
       let pendingImage = null;
+      const pendingImages = new Map();
+      let composerClientKey = null;
       let pendingAttachment = null;
       let pendingImageUrl = "";
       let pendingImageNode = null;
@@ -2039,18 +2090,17 @@
 
       function serializeDraft(root) {
         let content = "";
-        let imagePosition = null;
+        const images = [];
         const blockTags = new Set(["DIV", "P"]);
 
         function walk(parent) {
           const children = Array.from(parent.childNodes);
           children.forEach((node, index) => {
             if (
-              node === pendingImageNode ||
-              (node.nodeType === Node.ELEMENT_NODE &&
-                node.classList.contains("inline-draft-image"))
+              node.nodeType === Node.ELEMENT_NODE &&
+              node.classList.contains("inline-draft-image")
             ) {
-              imagePosition = Array.from(content).length;
+              images.push({ id: node.dataset.imageId, position: Array.from(content).length });
               return;
             }
             if (node.nodeType === Node.TEXT_NODE) {
@@ -2081,7 +2131,7 @@
         }
 
         walk(root);
-        return { content, imagePosition };
+        return { content, images, imagePosition: images[0]?.position ?? null };
       }
 
       function readDraft() {
@@ -2097,7 +2147,14 @@
       }
 
       function updateCounter() {
-        const { content } = readDraft();
+        const { content, images } = readDraft();
+        const visibleIds = new Set(images.map(image => image.id));
+        for (const [id, item] of pendingImages) {
+          if (!visibleIds.has(id)) {
+            URL.revokeObjectURL(item.url);
+            pendingImages.delete(id);
+          }
+        }
         const bytes = byteLength(content);
         if (todoMode) {
           const items = todoItemsFromContent(content);
@@ -2109,13 +2166,11 @@
             bytes > MAX_BYTES;
           return;
         }
-        const pendingUpload = pendingImage || pendingAttachment;
-        const limit = pendingUpload ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
+        const pendingUpload = images.length || pendingAttachment;
+        const limit = pendingAttachment ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
         const uploadLabel = pendingAttachment
           ? "12 KB（附件说明）"
-          : pendingImage
-            ? "12 KB（图片说明）"
-            : "200 KB";
+          : "200 KB";
         counter.textContent =
           `${formatBytes(bytes)} / ${uploadLabel}`;
         counter.classList.toggle("over", bytes > limit);
@@ -2127,7 +2182,7 @@
       }
 
       function setTodoMode(enabled) {
-        if (enabled && (pendingImage || pendingAttachment || imagePreparing)) {
+        if (enabled && (readDraft().images.length || pendingAttachment || imagePreparing)) {
           showToast("请先保存或移除当前文件，再切换到待办模式", true);
           return false;
         }
@@ -2311,6 +2366,8 @@
             entry.mime_type === next.mime_type &&
             entry.size_bytes === next.size_bytes &&
             entry.image_position === next.image_position &&
+            entry.revision === next.revision &&
+            JSON.stringify(entry.images || []) === JSON.stringify(next.images || []) &&
             JSON.stringify(entry.items || []) ===
               JSON.stringify(next.items || [])
           );
@@ -2443,6 +2500,225 @@
         );
       }
 
+      let mixedEditState = null;
+      function mixedImageUrl(entry, image, download = false) {
+        return `/api/entries/${entry.id}/images/${image.id}${download ? '/download' : ''}`;
+      }
+
+      function renderMixedContent(entry, root, editButton) {
+        const characters = Array.from(entry.content || '');
+        let offset = 0;
+        function appendText(text, start) {
+          if (!text) return;
+          const caption = document.createElement('pre');
+          caption.className = 'image-caption';
+          caption.dataset.entryId = String(entry.id);
+          caption.textContent = text;
+          caption.tabIndex = 0;
+          caption.addEventListener('click', event => {
+            let position = start + Array.from(text).length;
+            const point = document.caretPositionFromPoint?.(event.clientX, event.clientY);
+            if (point?.offsetNode && caption.contains(point.offsetNode)) {
+              position = start + Array.from(point.offsetNode.textContent.slice(0, point.offset)).length;
+            }
+            startMixedEdit(entry, root, editButton, position);
+          });
+          caption.addEventListener('keydown', event => {
+            if (event.key === 'Enter') { event.preventDefault(); startMixedEdit(entry, root, editButton, start + Array.from(text).length); }
+          });
+          root.append(caption);
+        }
+        for (const image of entry.images || []) {
+          const position = Math.max(offset, Math.min(image.position, characters.length));
+          appendText(characters.slice(offset, position).join(''), offset);
+          const link = document.createElement('a');
+          link.className = 'image-preview-link';
+          link.href = mixedImageUrl(entry, image);
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.setAttribute('aria-label', `查看原图：${image.filename || '图片'}`);
+          const preview = document.createElement('img');
+          preview.className = 'image-preview';
+          preview.src = link.href;
+          preview.alt = image.filename || '图片';
+          preview.loading = 'lazy';
+          link.append(preview);
+          const details = document.createElement('div');
+          details.className = 'image-details';
+          const info = document.createElement('div');
+          const name = document.createElement('p');
+          name.className = 'file-name';
+          name.textContent = image.filename || '图片';
+          const size = document.createElement('span');
+          size.className = 'file-size';
+          size.textContent = formatBytes(image.size_bytes || 0);
+          info.append(name, size);
+          const download = document.createElement('a');
+          download.className = 'secondary-link';
+          download.href = mixedImageUrl(entry, image, true);
+          download.textContent = '下载';
+          details.append(info, download);
+          root.append(link, details);
+          offset = position;
+        }
+        appendText(characters.slice(offset).join(''), offset);
+      }
+
+      function makeEditableImage(entry, image, local = null) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'inline-draft-image';
+        wrapper.contentEditable = 'false';
+        wrapper.dataset.imageId = image.id;
+        const preview = document.createElement('img');
+        preview.src = local?.url || mixedImageUrl(entry, image);
+        preview.alt = image.filename || '图片';
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'inline-draft-remove';
+        remove.textContent = '×';
+        remove.setAttribute('aria-label', '移除这张图片');
+        remove.addEventListener('pointerdown', event => event.preventDefault());
+        remove.addEventListener('click', () => {
+          wrapper.remove();
+          if (local) {
+            URL.revokeObjectURL(local.url);
+            mixedEditState?.local.delete(image.id);
+          }
+          mixedEditState?.editor.focus();
+        });
+        wrapper.append(preview, remove);
+        return wrapper;
+      }
+
+      async function insertMixedImage(state, file) {
+        if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+          showToast('仅支持 PNG、JPEG、WebP 和 GIF 图片', true);
+          return;
+        }
+        const selection = window.getSelection();
+        const saved = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+        const pending = (async () => {
+          const prepared = await prepareImage(file);
+          if (mixedEditState !== state) return;
+          const item = { id: crypto.randomUUID().replaceAll('-', ''), file: prepared.file,
+            url: URL.createObjectURL(prepared.file), staged: false };
+          state.local.set(item.id, item);
+          const wrapper = makeEditableImage(state.entry, { id: item.id, filename: file.name }, item);
+          const range = saved && state.editor.contains(saved.startContainer) ? saved : document.createRange();
+          if (range !== saved) { range.selectNodeContents(state.editor); range.collapse(false); }
+          range.deleteContents();
+          range.insertNode(wrapper);
+          range.setStartAfter(wrapper);
+          range.collapse(true);
+          state.editor.focus();
+          selection.removeAllRanges();
+          selection.addRange(range);
+        })();
+        state.pending.push(pending);
+        try { await pending; } catch (error) { showToast(`图片处理失败：${error.message}`, true); throw error; }
+        finally { state.pending = state.pending.filter(item => item !== pending); }
+      }
+
+      function finishMixedEdit(state, restore = true) {
+        if (mixedEditState !== state) return;
+        mixedEditState = null;
+        for (const item of state.local.values()) URL.revokeObjectURL(item.url);
+        if (restore && state.editor.isConnected) state.editor.replaceWith(state.original);
+        state.error.remove();
+        state.editButton.disabled = false;
+        resumeTodoSync();
+      }
+
+      async function saveMixedEdit(state) {
+        if (mixedEditState !== state) return false;
+        if (state.saving) return state.saving;
+        if (state.composing) return false;
+        state.saving = (async () => {
+          try {
+            await Promise.all(state.pending);
+            const draft = serializeDraft(state.editor);
+            if (!draft.content.trim() && !draft.images.length) throw new Error('内容不能为空；如需删除整条记录，请使用“删除”按钮');
+            if (byteLength(draft.content) > MAX_BYTES) throw new Error('文字不能超过 200 KB');
+            const unchanged = draft.content === state.entry.content &&
+              JSON.stringify(draft.images) === JSON.stringify((state.entry.images || []).map(i => ({id:i.id, position:i.position})));
+            if (unchanged) { finishMixedEdit(state); return true; }
+            await Promise.all(draft.images.filter(i => state.local.has(i.id)).map(i => stageDraftImage(state.local.get(i.id))));
+            const data = await api(`/api/entries/${state.entry.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ content: draft.content, images: draft.images,
+                expected_revision: state.entry.revision }),
+            });
+            entries = entries.map(item => item.id === state.entry.id ? data.entry : item);
+            finishMixedEdit(state, false);
+            renderEntries({ preserveScroll: true });
+            return true;
+          } catch (error) {
+            state.error.textContent = `${error.message}；草稿仍在，离开或按 Ctrl／⌘＋回车可重试，Esc 取消。`;
+            state.editor.setAttribute('aria-invalid', 'true');
+            state.editor.focus();
+            return false;
+          } finally { state.saving = null; }
+        })();
+        return state.saving;
+      }
+
+      async function startMixedEdit(entry, contentNode, editButton, position = null) {
+        if (mixedEditState) {
+          if (mixedEditState.entry.id === entry.id) return;
+          if (!(await saveMixedEdit(mixedEditState))) return;
+        }
+        if (inlineTodoEdit && !(await saveInlineTodoEdit())) return;
+        const editable = document.createElement('div');
+        editable.className = 'mixed-inline-editor';
+        editable.contentEditable = 'true';
+        editable.setAttribute('role', 'textbox');
+        editable.setAttribute('aria-multiline', 'true');
+        editable.setAttribute('aria-label', '编辑记忆，离开时自动保存');
+        editable.spellcheck = true;
+        const characters = Array.from(entry.content || '');
+        let offset = 0;
+        for (const image of entry.images || []) {
+          const next = Math.max(offset, Math.min(image.position, characters.length));
+          editable.append(document.createTextNode(characters.slice(offset, next).join('')));
+          editable.append(makeEditableImage(entry, image));
+          offset = next;
+        }
+        editable.append(document.createTextNode(characters.slice(offset).join('')));
+        const error = document.createElement('span');
+        error.className = 'mixed-edit-error';
+        error.setAttribute('role', 'alert');
+        const state = { entry, editor: editable, original: contentNode, editButton,
+          error, local: new Map(), pending: [], saving: null, composing: false };
+        mixedEditState = state;
+        contentNode.replaceWith(editable);
+        editable.after(error);
+        editButton.disabled = true;
+        editable.addEventListener('paste', event => {
+          event.preventDefault();
+          const file = event.clipboardData?.files?.[0];
+          if (file) insertMixedImage(state, file).catch(() => {});
+          else document.execCommand('insertText', false, event.clipboardData?.getData('text/plain') || '');
+        });
+        editable.addEventListener('drop', event => {
+          event.preventDefault();
+          const file = event.dataTransfer?.files?.[0];
+          if (file) insertMixedImage(state, file).catch(() => {});
+        });
+        editable.addEventListener('dragover', event => event.preventDefault());
+        editable.addEventListener('compositionstart', () => { state.composing = true; });
+        editable.addEventListener('compositionend', () => { state.composing = false; if (document.activeElement !== editable) saveMixedEdit(state); });
+        editable.addEventListener('blur', () => { if (!state.composing) saveMixedEdit(state); });
+        editable.addEventListener('keydown', event => {
+          if (event.key === 'Escape' && !state.saving) { event.preventDefault(); finishMixedEdit(state); }
+          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); saveMixedEdit(state); }
+        });
+        editable.focus({ preventScroll: true });
+        const range = rangeAtTextOffset(editable, position ?? characters.length);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+
       // An epoch also rejects GETs started before an interaction began.
       let todoInteractionEpoch = 0;
       let inlineTodoEdit = null;
@@ -2450,7 +2726,7 @@
       let pendingTodoWrites = 0;
       const todoWriteQueues = new Map();
       function todoInteractionBusy() {
-        return Boolean(inlineTodoEdit || pageTodoDrag || pendingTodoWrites || editingTodoEntryId);
+        return Boolean(inlineTodoEdit || mixedEditState || pageTodoDrag || pendingTodoWrites || editingTodoEntryId);
       }
       function resumeTodoSync() {
         if (!todoInteractionBusy()) loadEntries({ silent: true });
@@ -2543,8 +2819,31 @@
           event.preventDefault();
           if (!state.saving) document.execCommand('insertText', false, transfer?.getData('text/plain') || '');
         };
-        on('paste', (event) => insertPlainText(event, event.clipboardData));
-        on('drop', (event) => insertPlainText(event, event.dataTransfer));
+        const pasteOrDrop = (event, transfer) => {
+          const file = transfer?.files?.[0];
+          if (file && state.itemId == null && ALLOWED_IMAGE_TYPES.has(file.type)) {
+            event.preventDefault();
+            const selection = window.getSelection();
+            let position = Array.from(node.innerText).length;
+            if (selection?.anchorNode && node.contains(selection.anchorNode)) {
+              const before = document.createRange();
+              before.selectNodeContents(node);
+              before.setEnd(selection.anchorNode, selection.anchorOffset);
+              position = Array.from(before.cloneContents().textContent || '').length;
+            }
+            const currentEntry = entries.find(candidate => candidate.id === state.entryId);
+            const button = node.closest('article')?.querySelector('.entry-actions button');
+            if (button) {
+              startMixedEdit(currentEntry, node, button, position).then(() => {
+                if (mixedEditState?.entry.id === state.entryId) insertMixedImage(mixedEditState, file).catch(() => {});
+              });
+            }
+            return;
+          }
+          insertPlainText(event, transfer);
+        };
+        on('paste', event => pasteOrDrop(event, event.clipboardData));
+        on('drop', event => pasteOrDrop(event, event.dataTransfer));
         on('blur', () => { if (!state.composing) saveInlineTodoEdit(); });
         node.focus({ preventScroll: true });
         // Keep the clicked insertion position, including browsers using WebKit's API.
@@ -3360,25 +3659,25 @@
         pageTodoListenerController.abort();
         pageTodoListenerController = new AbortController();
         const scrollState = preserveScroll ? captureScrollState() : null;
+        const visibleEntries = entries.filter(matchesSearch);
+        clearButton.hidden = Boolean(searchQuery());
         history.replaceChildren();
-        entryCount.textContent = entries.length
-          ? `${entries.length} / 100 条`
-          : "0 条";
+        entryCount.textContent = searchQuery() ? `${visibleEntries.length} 条匹配` : (entries.length ? `${entries.length} / 100 条` : "0 条");
         clearButton.disabled = entries.length === 0;
 
-        if (!entries.length) {
+        if (!visibleEntries.length) {
           const empty = document.createElement("div");
           empty.className = "empty";
           const title = document.createElement("strong");
-          title.textContent = "还没有保存内容";
+          title.textContent = searchQuery() ? "没有找到匹配的记忆" : "还没有保存内容";
           const description = document.createElement("span");
-          description.textContent = "在上方粘贴文本，第一条记录会显示在这里。";
+          description.textContent = searchQuery() ? "试试其他关键词，或清除搜索查看全部记忆。" : "在上方粘贴文本，第一条记录会显示在这里。";
           empty.append(title, description);
           history.appendChild(empty);
           return;
         }
 
-        for (const entry of entries) {
+        for (const entry of visibleEntries) {
           const article = document.createElement("article");
           article.className = "entry";
 
@@ -3453,68 +3752,9 @@
 
             const imageContent = document.createElement("div");
             imageContent.className = "image-content";
-            const contentCharacters = Array.from(entry.content || "");
-            const imagePosition = Math.max(
-              0,
-              Math.min(
-                Number.isInteger(entry.image_position)
-                  ? entry.image_position
-                  : 0,
-                contentCharacters.length,
-              ),
-            );
-            const beforeImage = contentCharacters
-              .slice(0, imagePosition)
-              .join("");
-            const afterImage = contentCharacters
-              .slice(imagePosition)
-              .join("");
-
-            function appendCaption(text, placement) {
-              if (!text) return;
-              const caption = document.createElement("pre");
-              caption.className = `image-caption ${placement}`;
-              caption.dataset.entryId = String(entry.id);
-              caption.textContent = text;
-              imageContent.append(caption);
-            }
-
-            const previewLink = document.createElement("a");
-            previewLink.className = "image-preview-link";
-            previewLink.href = `/api/images/${entry.id}`;
-            previewLink.target = "_blank";
-            previewLink.rel = "noopener";
-            previewLink.setAttribute(
-              "aria-label",
-              `查看原图：${entry.filename}`,
-            );
-
-            const image = document.createElement("img");
-            image.className = "image-preview";
-            image.src = `/api/images/${entry.id}`;
-            image.alt = entry.filename || "上传的图片";
-            image.loading = "lazy";
-            image.decoding = "async";
-
-            const details = document.createElement("div");
-            details.className = "image-details";
-            const fileInfo = document.createElement("div");
-            fileInfo.style.minWidth = "0";
-            const filename = document.createElement("p");
-            filename.className = "file-name";
-            filename.textContent = entry.filename || "图片";
-            const size = document.createElement("span");
-            size.className = "file-size";
-            size.textContent = formatBytes(entry.size_bytes || 0);
-            fileInfo.append(filename, size);
-            details.append(fileInfo);
-            previewLink.append(image);
-            appendCaption(beforeImage, "before-image");
-            imageContent.append(previewLink);
-            appendCaption(afterImage, "after-image");
-            imageContent.append(details);
+            renderMixedContent(entry, imageContent, edit);
             edit.addEventListener("click", () =>
-              startEntryEdit(entry, imageContent, edit),
+              startMixedEdit(entry, imageContent, edit),
             );
             article.append(meta, imageContent);
           } else if (entry.type === "file") {
@@ -3655,8 +3895,11 @@
       async function loadEntries({ silent = false, force = false } = {}) {
         if (todoInteractionBusy()) return false;
         const epoch = todoInteractionEpoch;
+        const query = searchQuery();
+        const requestSequence = ++entryRequestSequence;
         try {
-          const data = await api("/api/entries");
+          const data = await api(query ? `/api/entries?q=${encodeURIComponent(query)}` : '/api/entries');
+          if (requestSequence !== entryRequestSequence || query !== searchQuery()) return false;
           if (todoInteractionBusy() || epoch !== todoInteractionEpoch) return false;
           setServerStatus(true);
           if (!force && entriesAreEqual(data.entries)) return true;
@@ -3664,6 +3907,7 @@
           renderEntries({ preserveScroll: true });
           return true;
         } catch (error) {
+          if (requestSequence !== entryRequestSequence || query !== searchQuery()) return false;
           if (todoInteractionBusy() || epoch !== todoInteractionEpoch) return false;
           if (!silent) {
             history.innerHTML = "";
@@ -3679,12 +3923,33 @@
         }
       }
 
+      async function stageDraftImage(item) {
+        if (item.staged) return;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), IMAGE_UPLOAD_TIMEOUT_MS);
+        let response;
+        try {
+          response = await fetch(`/api/draft-images/${item.id}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": item.file.type,
+              "X-Filename": encodeURIComponent(normalizedFilename(item.file)),
+            },
+            body: item.file,
+            signal: controller.signal,
+          });
+        } finally { clearTimeout(timeout); }
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `图片上传失败（${response.status}）`);
+        item.staged = true;
+      }
+
       async function saveEntry() {
-        const { content, imagePosition } = readDraft();
+        const { content, images } = readDraft();
         const bytes = byteLength(content);
         const todoItems = todoMode ? todoItemsFromContent(content) : [];
-        const pendingUpload = pendingImage || pendingAttachment;
-        const limit = pendingUpload ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
+        const pendingUpload = images.length || pendingAttachment;
+        const limit = pendingAttachment ? MAX_IMAGE_TEXT_BYTES : MAX_BYTES;
         if (todoMode ? !todoItems.length : !content.trim() && !pendingUpload) {
           showToast(
             todoMode
@@ -3699,8 +3964,6 @@
           showToast(
             pendingAttachment
               ? "附件说明不能超过 12 KB"
-              : pendingImage
-                ? "图片附带文字不能超过 12 KB"
               : "单条内容不能超过 200 KB",
             true,
           );
@@ -3719,41 +3982,13 @@
             });
           } else if (pendingAttachment) {
             data = await uploadAttachment(pendingAttachment, content);
-          } else if (pendingImage) {
-            const controller = new AbortController();
-            const timeout = setTimeout(
-              () => controller.abort(),
-              IMAGE_UPLOAD_TIMEOUT_MS,
-            );
-            let response;
-            try {
-              response = await fetch("/api/images", {
-                method: "POST",
-                headers: {
-                  "Content-Type": pendingImage.type,
-                  "X-Filename": encodeURIComponent(
-                    normalizedFilename(pendingImage),
-                  ),
-                  "X-Content": encodeURIComponent(content),
-                  "X-Image-Position": String(imagePosition ?? 0),
-                },
-                body: pendingImage,
-                signal: controller.signal,
-              });
-            } catch (error) {
-              if (error.name === "AbortError") {
-                throw new Error("图片上传超过 90 秒，请检查网络后重试");
-              }
-              throw error;
-            } finally {
-              clearTimeout(timeout);
-            }
-            data = await response.json().catch(() => ({}));
-            if (!response.ok) {
-              throw new Error(
-                data.error || `图片保存失败（${response.status}）`,
-              );
-            }
+          } else if (images.length) {
+            await Promise.all(images.map(image => stageDraftImage(pendingImages.get(image.id))));
+            composerClientKey ||= crypto.randomUUID().replaceAll("-", "");
+            data = await api("/api/entries", {
+              method: "POST",
+              body: JSON.stringify({ content, images, client_key: composerClientKey }),
+            });
           } else {
             data = await api("/api/entries", {
               method: "POST",
@@ -3959,20 +4194,25 @@
       }
 
       function releasePendingImage() {
+        for (const item of pendingImages.values()) URL.revokeObjectURL(item.url);
+        pendingImages.clear();
         pendingImage = null;
-        if (pendingImageUrl) URL.revokeObjectURL(pendingImageUrl);
         pendingImageUrl = "";
         pendingImageNode = null;
         imageInput.value = "";
       }
 
-      function removePendingImage({ focus = true } = {}) {
-        if (pendingImageNode?.isConnected) {
+      function removePendingImage({ focus = true, node = pendingImageNode } = {}) {
+        if (node?.isConnected) {
           const range = document.createRange();
-          range.setStartBefore(pendingImageNode);
+          range.setStartBefore(node);
           range.collapse(true);
-          pendingImageNode.remove();
-          releasePendingImage();
+          node.remove();
+          const item = pendingImages.get(node.dataset.imageId);
+          if (item) URL.revokeObjectURL(item.url);
+          pendingImages.delete(node.dataset.imageId);
+          pendingImage = [...pendingImages.values()].at(-1)?.file || null;
+          pendingImageNode = [...editor.querySelectorAll('.inline-draft-image')].at(-1) || null;
           if (focus) {
             editor.focus();
             selectRange(range);
@@ -4002,7 +4242,10 @@
           showToast("单个附件不能超过 100 MB", true);
           return false;
         }
-        if (pendingImage) removePendingImage({ focus: false });
+        if (pendingImages.size) {
+          editor.querySelectorAll('.inline-draft-image').forEach(node => node.remove());
+          releasePendingImage();
+        }
         pendingAttachment = file;
         pendingAttachmentName.textContent =
           file.name || `attachment-${Date.now()}`;
@@ -4017,6 +4260,7 @@
       function clearEditor() {
         editor.replaceChildren();
         releasePendingImage();
+        composerClientKey = null;
         releasePendingAttachment();
         savedRange = null;
         savedCaretPosition = 0;
@@ -4028,6 +4272,30 @@
         const textNode = document.createTextNode(text);
         parent.append(textNode);
         return { firstNode: textNode, lastNode: textNode };
+      }
+
+      function rangeAtTextOffset(root, offset) {
+        const range = document.createRange();
+        let remaining = Math.max(0, offset);
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            return node.parentElement?.closest('.inline-draft-image')
+              ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+          },
+        });
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          const characters = Array.from(node.data);
+          if (remaining <= characters.length) {
+            range.setStart(node, characters.slice(0, remaining).join('').length);
+            range.collapse(true);
+            return range;
+          }
+          remaining -= characters.length;
+        }
+        range.selectNodeContents(root);
+        range.collapse(offset === 0);
+        return range;
       }
 
       function canvasToBlob(canvas, type, quality) {
@@ -4326,6 +4594,7 @@
           return false;
         }
         releasePendingAttachment();
+        const insertionRange = currentEditorRange().cloneRange();
 
         const originalSize = file.size;
         let prepared;
@@ -4354,33 +4623,20 @@
           return false;
         }
 
-        const currentRange = currentEditorRange();
-        const caretPosition =
-          Number.isInteger(preferredPosition)
-            ? preferredPosition
-            : caretPositionForRange(currentRange);
-        const draft = readDraft();
-        const characters = Array.from(draft.content);
-        const insertionPosition = Math.max(
-          0,
-          Math.min(caretPosition, characters.length),
-        );
-        const beforeImage = characters
-          .slice(0, insertionPosition)
-          .join("");
-        const afterImage = characters.slice(insertionPosition).join("");
-
-        if (pendingImageUrl) URL.revokeObjectURL(pendingImageUrl);
+        const id = crypto.randomUUID().replaceAll("-", "");
+        const url = URL.createObjectURL(file);
+        pendingImages.set(id, { id, file, url, staged: false });
         pendingImage = file;
-        pendingImageUrl = URL.createObjectURL(file);
+        pendingImageUrl = url;
 
         const wrapper = document.createElement("div");
         wrapper.className = "inline-draft-image";
         wrapper.contentEditable = "false";
         wrapper.setAttribute("data-draft-image", "");
+        wrapper.dataset.imageId = id;
 
         const image = document.createElement("img");
-        image.src = pendingImageUrl;
+        image.src = url;
         image.alt = "待保存图片";
 
         const remove = document.createElement("button");
@@ -4391,25 +4647,25 @@
         remove.addEventListener("mousedown", (event) => {
           event.preventDefault();
         });
-        remove.addEventListener("click", () => removePendingImage());
+        remove.addEventListener("click", () => removePendingImage({ node: wrapper }));
         wrapper.append(image, remove);
 
-        editor.replaceChildren();
-        appendPlainText(editor, beforeImage);
-        editor.append(wrapper);
-        const afterNodes = appendPlainText(editor, afterImage);
+        const range = Number.isInteger(preferredPosition)
+          ? rangeAtTextOffset(editor, preferredPosition)
+          : insertionRange;
+        if (!editor.contains(range.startContainer)) {
+          range.selectNodeContents(editor);
+          range.collapse(false);
+        }
+        range.deleteContents();
+        range.insertNode(wrapper);
         pendingImageNode = wrapper;
 
-        const insertionRange = document.createRange();
-        if (afterNodes.firstNode) {
-          insertionRange.setStartBefore(afterNodes.firstNode);
-        } else {
-          insertionRange.setStartAfter(wrapper);
-        }
+        insertionRange.setStartAfter(wrapper);
         insertionRange.collapse(true);
         editor.focus();
         selectRange(insertionRange);
-        savedCaretPosition = insertionPosition;
+        savedCaretPosition = readDraft().images.at(-1)?.position ?? 0;
         updateCounter();
         if (prepared.compressed) {
           const dimensions = prepared.resized
@@ -4436,6 +4692,7 @@
       }
 
       async function clearEntries() {
+        if (searchQuery()) return;
         const confirmed = window.confirm(
           "确定清空全部文字、待办、图片和附件吗？服务器中的原始文件与未完成上传也会永久删除，此操作无法撤销。",
         );

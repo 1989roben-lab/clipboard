@@ -4,12 +4,22 @@ services:
   clipboard:
     build:
       context: .
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-http://127.0.0.1:7890}
+        HTTPS_PROXY: ${HTTPS_PROXY:-http://127.0.0.1:7890}
+    image: memory:45
     container_name: lan-clipboard-8016
     restart: unless-stopped
     init: true
     read_only: true
     ports:
       - "0.0.0.0:8016:8016"
+    env_file:
+      - ./.secrets/memory.env
+    networks:
+      - default
+      - database
     volumes:
       - clipboard-data:/data
     tmpfs:
@@ -32,3 +42,8 @@ services:
 volumes:
   clipboard-data:
     name: lan-clipboard-8016-data
+
+networks:
+  database:
+    external: true
+    name: mongodb-shared

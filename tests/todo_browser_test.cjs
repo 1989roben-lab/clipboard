@@ -2,7 +2,7 @@
  * PLAYWRIGHT_MODULE can point to an existing installation. No live data is used. */
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { mkdtempSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
@@ -15,8 +15,9 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const port = listener.address().port;
   await new Promise(resolve => listener.close(resolve));
   const base = `http://127.0.0.1:${port}`;
+  const mongo = new URL(process.env.TEST_MONGO_URI); mongo.pathname = '/memory_test_browser_' + require('crypto').randomBytes(10).toString('hex');
   const server = spawn('python3', ['server.py'], { cwd: path.resolve(__dirname, '..'),
-    env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), DB_PATH: path.join(dir, 'test.db') }, stdio: 'ignore' });
+    env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), DATA_DIR: dir, MONGO_URI: mongo.toString() }, stdio: 'ignore' });
   let browser;
   try {
     for (let i = 0; i < 60; i++) {
@@ -30,7 +31,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     };
     const entry = (await api('/api/entries', 'POST', { type: 'todo', items: ['Alpha', 'Beta', 'Gamma'] })).entry;
     const ids = entry.items.map(item => item.id);
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE} : {}) });
     const page = await browser.newPage({ viewport: { width: 900, height: 750 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -346,5 +347,6 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   } finally {
     if (browser) await browser.close();
     server.kill(); await new Promise(resolve => server.once('exit', resolve)); rmSync(dir, { recursive: true, force: true });
+    spawnSync('python3', ['-c', 'import os;from pymongo import MongoClient;c=MongoClient(os.environ["MONGO_URI"]);d=c.get_default_database();assert d.name.startswith("memory_test_");c.drop_database(d.name);c.close()'], {env:{...process.env,MONGO_URI:mongo.toString()}});
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
