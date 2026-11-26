@@ -723,6 +723,7 @@
         width: 100%;
         margin: 16px 0;
         cursor: text;
+        touch-action: manipulation;
       }
 
       .image-preview {
@@ -773,8 +774,75 @@
       .mixed-inline-editor .inline-draft-image img {
         max-height: 520px;
         border-radius: 0;
+        touch-action: manipulation;
       }
       .mixed-edit-error { display: block; padding: 8px 18px 14px; color: var(--danger); }
+
+      .image-viewer {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        max-width: none;
+        max-height: none;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        border: 0;
+        background: #111820;
+        color: #fff;
+      }
+      .image-viewer:not([open]) { display: none; }
+      .image-viewer::backdrop { background: rgba(8, 13, 20, 0.94); }
+      .image-viewer-stage {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        touch-action: none;
+        cursor: grab;
+      }
+      .image-viewer-stage.dragging { cursor: grabbing; }
+      .image-viewer-image {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        display: block;
+        max-width: calc(100% - 32px);
+        max-height: calc(100% - 104px);
+        object-fit: contain;
+        pointer-events: none;
+        user-select: none;
+        transform: translate(-50%, -50%) translate(var(--view-x, 0px), var(--view-y, 0px)) scale(var(--view-scale, 1));
+      }
+      .image-viewer-controls {
+        position: absolute;
+        z-index: 1;
+        right: max(14px, env(safe-area-inset-right));
+        bottom: max(18px, env(safe-area-inset-bottom));
+        left: max(14px, env(safe-area-inset-left));
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        pointer-events: none;
+      }
+      .image-viewer-controls button,
+      .image-viewer-close {
+        min-width: 44px;
+        min-height: 44px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 999px;
+        background: rgba(26, 35, 45, 0.84);
+        color: #fff;
+        cursor: pointer;
+        pointer-events: auto;
+      }
+      .image-viewer-close {
+        position: absolute;
+        z-index: 1;
+        top: max(14px, env(safe-area-inset-top));
+        right: max(14px, env(safe-area-inset-right));
+      }
 
       .file-name {
         overflow: hidden;
@@ -2007,6 +2075,18 @@
       </div>
     </div>
 
+    <dialog class="image-viewer" id="image-viewer" aria-label="查看大图">
+      <div class="image-viewer-stage" id="image-viewer-stage">
+        <img class="image-viewer-image" id="image-viewer-image" alt="" />
+      </div>
+      <button class="image-viewer-close" id="image-viewer-close" type="button" aria-label="关闭大图">×</button>
+      <div class="image-viewer-controls">
+        <button id="image-viewer-out" type="button" aria-label="缩小图片">−</button>
+        <button id="image-viewer-reset" type="button">复位</button>
+        <button id="image-viewer-in" type="button" aria-label="放大图片">＋</button>
+      </div>
+    </dialog>
+
     <script>
       const MAX_BYTES = 200 * 1024;
       const MAX_IMAGE_TEXT_BYTES = 12 * 1024;
@@ -2052,6 +2132,10 @@
       const cameraStatus = document.querySelector("#camera-status");
       const cancelCamera = document.querySelector("#cancel-camera");
       const captureCamera = document.querySelector("#capture-camera");
+      const imageViewer = document.querySelector("#image-viewer");
+      const imageViewerStage = document.querySelector("#image-viewer-stage");
+      const imageViewerImage = document.querySelector("#image-viewer-image");
+      const imageViewerClose = document.querySelector("#image-viewer-close");
       const counter = document.querySelector("#counter");
       const history = document.querySelector("#history");
       const entryCount = document.querySelector("#entry-count");
@@ -2552,6 +2636,190 @@
       }
 
       let mixedEditState = null;
+      const IMAGE_DOUBLE_TAP_MS = 320;
+      let pendingImageTap = null;
+      let imageViewerState = null;
+
+      function cancelPendingImageTap() {
+        if (!pendingImageTap) return;
+        clearTimeout(pendingImageTap.timer);
+        pendingImageTap = null;
+      }
+
+      function resetImageViewer() {
+        if (!imageViewerState) return;
+        Object.assign(imageViewerState, { scale: 1, x: 0, y: 0 });
+        updateImageViewer();
+      }
+
+      function updateImageViewer() {
+        const state = imageViewerState;
+        if (!state) return;
+        const maxX = Math.max(0, (imageViewerImage.offsetWidth * state.scale - imageViewerStage.clientWidth) / 2);
+        const maxY = Math.max(0, (imageViewerImage.offsetHeight * state.scale - imageViewerStage.clientHeight) / 2);
+        state.x = Math.max(-maxX, Math.min(maxX, state.x));
+        state.y = Math.max(-maxY, Math.min(maxY, state.y));
+        imageViewerImage.style.setProperty('--view-scale', String(state.scale));
+        imageViewerImage.style.setProperty('--view-x', `${state.x}px`);
+        imageViewerImage.style.setProperty('--view-y', `${state.y}px`);
+      }
+
+      function zoomImageViewer(scale, clientX, clientY) {
+        const state = imageViewerState;
+        if (!state) return;
+        const next = Math.max(1, Math.min(4, scale));
+        const bounds = imageViewerStage.getBoundingClientRect();
+        const focusX = clientX - bounds.left - bounds.width / 2;
+        const focusY = clientY - bounds.top - bounds.height / 2;
+        const factor = next / state.scale;
+        state.x = focusX - (focusX - state.x) * factor;
+        state.y = focusY - (focusY - state.y) * factor;
+        state.scale = next;
+        updateImageViewer();
+      }
+
+      function closeImageViewer() {
+        if (imageViewer.open) imageViewer.close();
+      }
+
+      function openImageViewer(src, alt, returnFocus, editState = null) {
+        if (imageViewer.open) return;
+        cancelPendingImageTap();
+        editState ||= mixedEditState;
+        const selection = window.getSelection();
+        const caret = editState && selection?.rangeCount && editState.editor.contains(selection.anchorNode)
+          ? selection.getRangeAt(0).cloneRange() : null;
+        imageViewerState = { scale: 1, x: 0, y: 0, pointers: new Map(), gesture: null,
+          moved: false, returnFocus, editState, caret,
+          scrollY: window.scrollY, previousOverflow: document.documentElement.style.overflow };
+        if (editState) editState.previewOpen = true;
+        imageViewerImage.alt = alt || '图片';
+        imageViewerImage.src = src;
+        document.documentElement.style.overflow = 'hidden';
+        imageViewer.showModal();
+        resetImageViewer();
+        imageViewerClose.focus({ preventScroll: true });
+      }
+
+      function queueImageTap(key, src, alt, returnFocus, onSingle, editState = null) {
+        const stamp = performance.now();
+        if (pendingImageTap?.key === key && stamp - pendingImageTap.stamp <= IMAGE_DOUBLE_TAP_MS) {
+          cancelPendingImageTap();
+          openImageViewer(src, alt, returnFocus, editState);
+          return;
+        }
+        cancelPendingImageTap();
+        const tap = { key, stamp, timer: null };
+        tap.timer = setTimeout(() => {
+          if (pendingImageTap !== tap) return;
+          pendingImageTap = null;
+          onSingle?.();
+        }, IMAGE_DOUBLE_TAP_MS);
+        pendingImageTap = tap;
+      }
+
+      imageViewer.addEventListener('close', () => {
+        const state = imageViewerState;
+        imageViewerState = null;
+        if (!state) return;
+        imageViewerImage.removeAttribute('src');
+        imageViewerStage.classList.remove('dragging');
+        document.documentElement.style.overflow = state.previousOverflow;
+        window.scrollTo({ top: state.scrollY, behavior: 'auto' });
+        if (state.editState?.editor.isConnected) {
+          state.editState.previewOpen = false;
+          state.editState.editor.focus({ preventScroll: true });
+          if (state.caret && state.editState.editor.contains(state.caret.startContainer)) {
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(state.caret);
+          }
+        } else if (state.returnFocus?.isConnected) {
+          state.returnFocus.focus({ preventScroll: true });
+        }
+      });
+      imageViewer.addEventListener('cancel', event => {
+        event.preventDefault();
+        closeImageViewer();
+      });
+      imageViewerClose.addEventListener('click', closeImageViewer);
+      document.querySelector('#image-viewer-reset').addEventListener('click', resetImageViewer);
+      document.querySelector('#image-viewer-in').addEventListener('click', () => {
+        const bounds = imageViewerStage.getBoundingClientRect();
+        zoomImageViewer(imageViewerState.scale * 1.5, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+      });
+      document.querySelector('#image-viewer-out').addEventListener('click', () => {
+        const bounds = imageViewerStage.getBoundingClientRect();
+        zoomImageViewer(imageViewerState.scale / 1.5, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+      });
+      imageViewerImage.addEventListener('load', resetImageViewer);
+      imageViewerImage.addEventListener('error', () => {
+        showToast('图片加载失败', true);
+        closeImageViewer();
+      });
+      imageViewerStage.addEventListener('pointerdown', event => {
+        const state = imageViewerState;
+        if (!state || (event.pointerType === 'mouse' && event.button !== 0)) return;
+        event.preventDefault();
+        imageViewerStage.setPointerCapture(event.pointerId);
+        state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        imageViewerStage.classList.add('dragging');
+        state.gesture = null;
+        state.moved = false;
+      });
+      imageViewerStage.addEventListener('pointermove', event => {
+        const state = imageViewerState;
+        const previous = state?.pointers.get(event.pointerId);
+        if (!previous) return;
+        state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        const points = [...state.pointers.values()];
+        if (points.length === 1) {
+          const dx = event.clientX - previous.x, dy = event.clientY - previous.y;
+          if (Math.abs(dx) + Math.abs(dy) > 2) state.moved = true;
+          state.x += dx;
+          state.y += dy;
+          updateImageViewer();
+        } else if (points.length === 2) {
+          const mid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+          const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+          if (state.gesture?.distance && distance) {
+            zoomImageViewer(state.scale * distance / state.gesture.distance, mid.x, mid.y);
+            state.x += mid.x - state.gesture.mid.x;
+            state.y += mid.y - state.gesture.mid.y;
+            updateImageViewer();
+            state.moved = true;
+          }
+          state.gesture = { distance, mid };
+        }
+      });
+      for (const name of ['pointerup', 'pointercancel']) {
+        imageViewerStage.addEventListener(name, event => {
+          imageViewerState?.pointers.delete(event.pointerId);
+          if (imageViewerState) {
+            imageViewerState.gesture = null;
+            if (!imageViewerState.pointers.size) imageViewerStage.classList.remove('dragging');
+          }
+        });
+      }
+      imageViewerStage.addEventListener('click', event => {
+        const state = imageViewerState;
+        if (!state || state.moved) { if (state) state.moved = false; return; }
+        const bounds = imageViewerImage.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right ||
+            event.clientY < bounds.top || event.clientY > bounds.bottom) closeImageViewer();
+      });
+      imageViewerStage.addEventListener('dblclick', event => {
+        event.preventDefault();
+        zoomImageViewer(imageViewerState.scale === 1 ? 2 : 1, event.clientX, event.clientY);
+      });
+      imageViewerStage.addEventListener('wheel', event => {
+        event.preventDefault();
+        zoomImageViewer(imageViewerState.scale * (event.deltaY < 0 ? 1.2 : 1 / 1.2), event.clientX, event.clientY);
+      }, { passive: false });
+      document.addEventListener('pointerdown', event => {
+        if (pendingImageTap && !event.target.closest('.document-image, .inline-draft-image')) cancelPendingImageTap();
+      }, true);
+
       function mixedImageUrl(entry, image, download = false) {
         return `/api/entries/${entry.id}/images/${image.id}${download ? '/download' : ''}`;
       }
@@ -2586,10 +2854,17 @@
           imageBlock.className = 'document-image';
           imageBlock.tabIndex = 0;
           imageBlock.setAttribute('role', 'button');
-          imageBlock.setAttribute('aria-label', `编辑图片附近的内容：${image.filename || '图片'}`);
-          imageBlock.addEventListener('click', () => startMixedEdit(entry, root, editButton, position));
+          imageBlock.setAttribute('aria-label', `单击编辑、双击查看大图：${image.filename || '图片'}`);
+          imageBlock.addEventListener('pointerdown', event => {
+            if (mixedEditState) event.preventDefault();
+          });
+          imageBlock.addEventListener('click', () => queueImageTap(
+            `read:${entry.id}:${image.id}`, preview.src, preview.alt, imageBlock,
+            () => { if (imageBlock.isConnected) startMixedEdit(entry, root, editButton, position); },
+          ));
           imageBlock.addEventListener('keydown', event => {
             if (event.key === 'Enter') { event.preventDefault(); startMixedEdit(entry, root, editButton, position); }
+            if (event.key === ' ') { event.preventDefault(); openImageViewer(preview.src, preview.alt, imageBlock); }
           });
           const preview = document.createElement('img');
           preview.className = 'image-preview';
@@ -2611,6 +2886,12 @@
         const preview = document.createElement('img');
         preview.src = local?.url || mixedImageUrl(entry, image);
         preview.alt = image.filename || '图片';
+        preview.addEventListener('pointerdown', event => event.preventDefault());
+        preview.addEventListener('click', () => {
+          const state = mixedEditState;
+          if (state?.entry.id !== entry.id) return;
+          queueImageTap(`edit:${entry.id}:${image.id}`, preview.src, preview.alt, preview, null, state);
+        });
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'inline-draft-remove';
@@ -2765,8 +3046,8 @@
         });
         editable.addEventListener('dragover', event => event.preventDefault());
         editable.addEventListener('compositionstart', () => { state.composing = true; });
-        editable.addEventListener('compositionend', () => { state.composing = false; if (document.activeElement !== editable) saveMixedEdit(state); });
-        editable.addEventListener('blur', () => { if (!state.composing) saveMixedEdit(state); });
+        editable.addEventListener('compositionend', () => { state.composing = false; if (document.activeElement !== editable && !state.previewOpen) saveMixedEdit(state); });
+        editable.addEventListener('blur', () => { if (!state.composing && !state.previewOpen) saveMixedEdit(state); });
         editable.addEventListener('keydown', event => {
           if (event.key === 'Escape' && !state.saving) { event.preventDefault(); finishMixedEdit(state); }
           if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); saveMixedEdit(state); }
@@ -5022,7 +5303,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=47", {
+            .register("/service-worker.js?v=48", {
               updateViaCache: "none",
             })
             .then(async (registration) => {

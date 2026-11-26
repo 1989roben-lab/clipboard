@@ -8,7 +8,7 @@ services:
       args:
         HTTP_PROXY: ${HTTP_PROXY:-http://127.0.0.1:7890}
         HTTPS_PROXY: ${HTTPS_PROXY:-http://127.0.0.1:7890}
-    image: memory:47
+    image: memory:48
     container_name: lan-clipboard-8016
     restart: unless-stopped
     init: true
