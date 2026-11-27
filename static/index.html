@@ -754,17 +754,24 @@
         font: inherit;
         line-height: 1.65;
       }
-      .leading-text-slot {
-        position: relative;
+      .doc-text-segment {
         min-height: 1.65em;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
         cursor: text;
       }
-      .leading-text-slot[data-empty="true"]::before {
-        position: absolute;
-        color: #75808d;
-        content: "点这里，在第一张图片前输入文字";
-        pointer-events: none;
+      .doc-text-segment[data-empty="true"] {
+        min-height: 28px;
+        background: linear-gradient(transparent 25px, rgba(0, 122, 255, 0.18) 25px, rgba(0, 122, 255, 0.18) 26px, transparent 26px);
       }
+      .inline-draft-image.is-selected {
+        outline: 2px solid #007aff;
+        outline-offset: 2px;
+      }
+      .mixed-inline-editor .inline-draft-remove { display: none; }
+      .mixed-inline-editor .inline-draft-image.is-selected .inline-draft-remove { display: grid; }
+      .rich-editor .inline-draft-remove { display: none; }
+      .rich-editor .inline-draft-image.is-selected .inline-draft-remove { display: grid; }
       .mixed-inline-editor .inline-draft-image {
         width: 100%;
         margin: 16px 0;
@@ -2202,6 +2209,7 @@
       let todoDialogReturnFocus = null;
       let todoDragState = null;
       let editorIsComposing = false;
+      let composerSelectedImage = null;
 
       function byteLength(text) {
         return encoder.encode(text).length;
@@ -2226,11 +2234,10 @@
         function walk(parent) {
           const children = Array.from(parent.childNodes);
           children.forEach((node, index) => {
-            if (
-              node.nodeType === Node.ELEMENT_NODE &&
-              node.classList.contains("leading-text-slot") &&
-              !node.textContent.replaceAll(EDITOR_CARET_ANCHOR, "").trim()
-            ) return;
+            if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('doc-text-segment')) {
+              if (node.textContent.replaceAll(EDITOR_CARET_ANCHOR, '').length) walk(node);
+              return;
+            }
             if (
               node.nodeType === Node.ELEMENT_NODE &&
               node.classList.contains("inline-draft-image")
@@ -2824,10 +2831,158 @@
         return `/api/entries/${entry.id}/images/${image.id}${download ? '/download' : ''}`;
       }
 
+      function createDocTextSegment(text = '') {
+        const segment = document.createElement('div');
+        segment.className = 'doc-text-segment';
+        segment.dataset.empty = String(!text);
+        if (text) segment.textContent = text;
+        else segment.append(document.createElement('br'));
+        segment.addEventListener('click', () => {
+          if (segment.dataset.empty === 'true') setDocCaret(segment, 0);
+        });
+        return segment;
+      }
+
+      function setDocCaret(segment, offset, focus = true) {
+        const root = segment.closest('.mixed-inline-editor, .rich-editor');
+        if (!root) return;
+        if (focus) root.focus({ preventScroll: true });
+        const range = document.createRange();
+        const textNode = [...segment.childNodes].find(node => node.nodeType === Node.TEXT_NODE);
+        if (textNode) range.setStart(textNode, Math.max(0, Math.min(offset, textNode.length)));
+        else range.setStart(segment, 0);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+
+      function clearMixedImageSelection(state) {
+        state.selectedImage?.classList.remove('is-selected');
+        state.selectedImage = null;
+      }
+
+      function setMixedCaretAtImage(state, wrapper, side) {
+        clearMixedImageSelection(state);
+        const segment = side === 'before' ? wrapper.previousElementSibling : wrapper.nextElementSibling;
+        if (!segment?.classList.contains('doc-text-segment')) return;
+        const offset = side === 'before' ? segment.textContent.length : 0;
+        setDocCaret(segment, offset);
+      }
+
+      function selectMixedImage(state, wrapper) {
+        if (mixedEditState !== state || !wrapper.isConnected) return;
+        clearMixedImageSelection(state);
+        state.selectedImage = wrapper;
+        wrapper.classList.add('is-selected');
+        state.editor.focus({ preventScroll: true });
+        const range = document.createRange();
+        range.selectNode(wrapper);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+
+      function removeMixedImage(state, wrapper) {
+        if (!wrapper?.isConnected) return;
+        const after = wrapper.nextElementSibling;
+        const before = wrapper.previousElementSibling;
+        clearMixedImageSelection(state);
+        wrapper.remove();
+        if (before?.classList.contains('doc-text-segment') && after?.classList.contains('doc-text-segment')) {
+          const join = before.textContent.length;
+          before.textContent += after.textContent;
+          before.dataset.empty = String(!before.textContent);
+          if (!before.textContent) before.append(document.createElement('br'));
+          after.remove();
+          setDocCaret(before, join);
+          return;
+        }
+        if (after?.classList.contains('doc-text-segment')) setDocCaret(after, 0);
+        else if (before?.classList.contains('doc-text-segment')) setDocCaret(before, before.textContent.length);
+      }
+
+      function adjacentMixedImage(state, direction) {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount || !selection.getRangeAt(0).collapsed) return null;
+        const range = selection.getRangeAt(0);
+        const node = range.startContainer.nodeType === Node.TEXT_NODE
+          ? range.startContainer.parentElement : range.startContainer;
+        const segment = node?.closest?.('.doc-text-segment');
+        if (!segment || !state.editor.contains(segment)) return null;
+        const part = document.createRange();
+        part.selectNodeContents(segment);
+        if (direction === 'backward') {
+          part.setEnd(range.startContainer, range.startOffset);
+          if (part.toString().replaceAll(EDITOR_CARET_ANCHOR, '')) return null;
+          return segment.previousElementSibling?.classList.contains('inline-draft-image')
+            ? segment.previousElementSibling : null;
+        }
+        part.setStart(range.startContainer, range.startOffset);
+        if (part.toString().replaceAll(EDITOR_CARET_ANCHOR, '')) return null;
+        return segment.nextElementSibling?.classList.contains('inline-draft-image')
+          ? segment.nextElementSibling : null;
+      }
+
+      function insertMixedText(state, text) {
+        if (state.selectedImage) setMixedCaretAtImage(state, state.selectedImage, 'after');
+        const selection = window.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+        if (!range || !state.editor.contains(range.startContainer)) return;
+        range.deleteContents();
+        const node = document.createTextNode(text.replace(/\r\n?/g, '\n'));
+        range.insertNode(node);
+        range.setStart(node, node.length);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const segment = node.parentElement?.closest('.doc-text-segment');
+        if (segment) {
+          segment.querySelectorAll('br').forEach(br => br.remove());
+          segment.dataset.empty = 'false';
+        }
+      }
+
+      function updateDocSegments(root) {
+        root.querySelectorAll(':scope > .doc-text-segment').forEach(segment => {
+          const empty = !segment.textContent.replaceAll(EDITOR_CARET_ANCHOR, '');
+          segment.dataset.empty = String(empty);
+          if (empty && !segment.querySelector('br')) segment.append(document.createElement('br'));
+          if (!empty) segment.querySelectorAll('br').forEach(br => br.remove());
+        });
+      }
+
+      function insertImageAtDocCaret(root, wrapper, savedRange = null) {
+        const selection = window.getSelection();
+        let range = savedRange && root.contains(savedRange.startContainer) ? savedRange :
+          selection?.rangeCount ? selection.getRangeAt(0) : null;
+        let segment = range && root.contains(range.startContainer)
+          ? (range.startContainer.nodeType === Node.TEXT_NODE
+            ? range.startContainer.parentElement : range.startContainer).closest?.('.doc-text-segment') : null;
+        if (!segment || !root.contains(segment)) {
+          segment = root.querySelector(':scope > .doc-text-segment:last-child');
+          range = document.createRange();
+          range.selectNodeContents(segment);
+          range.collapse(false);
+        }
+        range.deleteContents();
+        const left = document.createRange();
+        left.selectNodeContents(segment);
+        left.setEnd(range.startContainer, range.startOffset);
+        const split = left.toString().length;
+        const value = segment.textContent.replaceAll(EDITOR_CARET_ANCHOR, '');
+        const after = createDocTextSegment(value.slice(split));
+        segment.textContent = value.slice(0, split);
+        updateDocSegments(root);
+        segment.after(wrapper, after);
+        setDocCaret(after, 0);
+        return after;
+      }
+
       function renderMixedContent(entry, root, editButton) {
         const characters = Array.from(entry.content || '');
         let offset = 0;
-        function appendText(text, start) {
+        function appendText(text, start, segmentIndex) {
           if (!text) return;
           const caption = document.createElement('pre');
           caption.className = 'image-caption';
@@ -2835,21 +2990,21 @@
           caption.textContent = text;
           caption.tabIndex = 0;
           caption.addEventListener('click', event => {
-            let position = start + Array.from(text).length;
+            let position = Array.from(text).length;
             const point = document.caretPositionFromPoint?.(event.clientX, event.clientY);
             if (point?.offsetNode && caption.contains(point.offsetNode)) {
-              position = start + Array.from(point.offsetNode.textContent.slice(0, point.offset)).length;
+              position = Array.from(point.offsetNode.textContent.slice(0, point.offset)).length;
             }
-            startMixedEdit(entry, root, editButton, position);
+            startMixedEdit(entry, root, editButton, { segmentIndex, textOffset: position });
           });
           caption.addEventListener('keydown', event => {
-            if (event.key === 'Enter') { event.preventDefault(); startMixedEdit(entry, root, editButton, start + Array.from(text).length); }
+            if (event.key === 'Enter') { event.preventDefault(); startMixedEdit(entry, root, editButton, { segmentIndex, textOffset: Array.from(text).length }); }
           });
           root.append(caption);
         }
-        for (const image of entry.images || []) {
+        for (const [index, image] of (entry.images || []).entries()) {
           const position = Math.max(offset, Math.min(image.position, characters.length));
-          appendText(characters.slice(offset, position).join(''), offset);
+          appendText(characters.slice(offset, position).join(''), offset, index);
           const imageBlock = document.createElement('div');
           imageBlock.className = 'document-image';
           imageBlock.tabIndex = 0;
@@ -2860,10 +3015,10 @@
           });
           imageBlock.addEventListener('click', () => queueImageTap(
             `read:${entry.id}:${image.id}`, preview.src, preview.alt, imageBlock,
-            () => { if (imageBlock.isConnected) startMixedEdit(entry, root, editButton, position); },
+            () => { if (imageBlock.isConnected) startMixedEdit(entry, root, editButton, { imageId: image.id, selectImage: true }); },
           ));
           imageBlock.addEventListener('keydown', event => {
-            if (event.key === 'Enter') { event.preventDefault(); startMixedEdit(entry, root, editButton, position); }
+            if (event.key === 'Enter') { event.preventDefault(); startMixedEdit(entry, root, editButton, { imageId: image.id, selectImage: true }); }
             if (event.key === ' ') { event.preventDefault(); openImageViewer(preview.src, preview.alt, imageBlock); }
           });
           const preview = document.createElement('img');
@@ -2875,7 +3030,7 @@
           root.append(imageBlock);
           offset = position;
         }
-        appendText(characters.slice(offset).join(''), offset);
+        appendText(characters.slice(offset).join(''), offset, (entry.images || []).length);
       }
 
       function makeEditableImage(entry, image, local = null) {
@@ -2890,7 +3045,8 @@
         preview.addEventListener('click', () => {
           const state = mixedEditState;
           if (state?.entry.id !== entry.id) return;
-          queueImageTap(`edit:${entry.id}:${image.id}`, preview.src, preview.alt, preview, null, state);
+          queueImageTap(`edit:${entry.id}:${image.id}`, preview.src, preview.alt, preview,
+            () => selectMixedImage(state, wrapper), state);
         });
         const remove = document.createElement('button');
         remove.type = 'button';
@@ -2899,12 +3055,7 @@
         remove.setAttribute('aria-label', '移除这张图片');
         remove.addEventListener('pointerdown', event => event.preventDefault());
         remove.addEventListener('click', () => {
-          wrapper.remove();
-          if (local) {
-            URL.revokeObjectURL(local.url);
-            mixedEditState?.local.delete(image.id);
-          }
-          mixedEditState?.editor.focus();
+          if (mixedEditState?.entry.id === entry.id) removeMixedImage(mixedEditState, wrapper);
         });
         wrapper.append(preview, remove);
         return wrapper;
@@ -2915,6 +3066,7 @@
           showToast('仅支持 PNG、JPEG、WebP 和 GIF 图片', true);
           return;
         }
+        if (state.selectedImage) setMixedCaretAtImage(state, state.selectedImage, 'after');
         const selection = window.getSelection();
         const saved = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
         const pending = (async () => {
@@ -2924,15 +3076,7 @@
             url: URL.createObjectURL(prepared.file), staged: false };
           state.local.set(item.id, item);
           const wrapper = makeEditableImage(state.entry, { id: item.id, filename: file.name }, item);
-          const range = saved && state.editor.contains(saved.startContainer) ? saved : document.createRange();
-          if (range !== saved) { range.selectNodeContents(state.editor); range.collapse(false); }
-          range.deleteContents();
-          range.insertNode(wrapper);
-          range.setStartAfter(wrapper);
-          range.collapse(true);
-          state.editor.focus();
-          selection.removeAllRanges();
-          selection.addRange(range);
+          insertImageAtDocCaret(state.editor, wrapper, saved);
         })();
         state.pending.push(pending);
         try { await pending; } catch (error) { showToast(`图片处理失败：${error.message}`, true); throw error; }
@@ -2996,39 +3140,20 @@
         editable.setAttribute('aria-label', '编辑记忆，离开时自动保存');
         editable.spellcheck = true;
         const characters = Array.from(entry.content || '');
-        if (entry.images?.[0]?.position === 0) {
-          const leading = document.createElement('div');
-          leading.className = 'leading-text-slot';
-          leading.dataset.empty = 'true';
-          leading.append(document.createElement('br'));
-          leading.addEventListener('click', () => {
-            if (leading.dataset.empty !== 'true') return;
-            editable.focus();
-            const selection = window.getSelection();
-            const range = document.createRange();
-            range.setStart(leading, 0);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-          });
-          editable.append(leading);
-          editable.addEventListener('input', () => {
-            leading.dataset.empty = String(!leading.textContent.trim());
-          });
-        }
         let offset = 0;
         for (const image of entry.images || []) {
           const next = Math.max(offset, Math.min(image.position, characters.length));
-          editable.append(document.createTextNode(characters.slice(offset, next).join('')));
+          editable.append(createDocTextSegment(characters.slice(offset, next).join('')));
           editable.append(makeEditableImage(entry, image));
           offset = next;
         }
-        editable.append(document.createTextNode(characters.slice(offset).join('')));
+        editable.append(createDocTextSegment(characters.slice(offset).join('')));
         const error = document.createElement('span');
         error.className = 'mixed-edit-error';
         error.setAttribute('role', 'alert');
         const state = { entry, editor: editable, original: contentNode, editButton,
-          error, local: new Map(), pending: [], saving: null, composing: false };
+          error, local: new Map(), pending: [], saving: null, composing: false,
+          selectedImage: null, previewOpen: false };
         mixedEditState = state;
         contentNode.replaceWith(editable);
         editable.after(error);
@@ -3037,7 +3162,7 @@
           event.preventDefault();
           const file = event.clipboardData?.files?.[0];
           if (file) insertMixedImage(state, file).catch(() => {});
-          else document.execCommand('insertText', false, event.clipboardData?.getData('text/plain') || '');
+          else insertMixedText(state, event.clipboardData?.getData('text/plain') || '');
         });
         editable.addEventListener('drop', event => {
           event.preventDefault();
@@ -3045,18 +3170,53 @@
           if (file) insertMixedImage(state, file).catch(() => {});
         });
         editable.addEventListener('dragover', event => event.preventDefault());
+        editable.addEventListener('input', () => updateDocSegments(editable));
+        editable.addEventListener('click', event => {
+          if (!event.target.closest('.inline-draft-image')) clearMixedImageSelection(state);
+        });
         editable.addEventListener('compositionstart', () => { state.composing = true; });
         editable.addEventListener('compositionend', () => { state.composing = false; if (document.activeElement !== editable && !state.previewOpen) saveMixedEdit(state); });
         editable.addEventListener('blur', () => { if (!state.composing && !state.previewOpen) saveMixedEdit(state); });
         editable.addEventListener('keydown', event => {
           if (event.key === 'Escape' && !state.saving) { event.preventDefault(); finishMixedEdit(state); }
           if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); saveMixedEdit(state); }
+          if (!state.composing && ['Backspace', 'Delete'].includes(event.key)) {
+            const image = state.selectedImage || adjacentMixedImage(state, event.key === 'Backspace' ? 'backward' : 'forward');
+            if (image) { event.preventDefault(); removeMixedImage(state, image); }
+          }
+        });
+        editable.addEventListener('beforeinput', event => {
+          if (!event.cancelable || state.composing) return;
+          if (state.selectedImage && event.inputType === 'insertText' && event.data) {
+            event.preventDefault();
+            insertMixedText(state, event.data);
+            return;
+          }
+          if (state.selectedImage && event.inputType.startsWith('insert')) {
+            setMixedCaretAtImage(state, state.selectedImage, 'after');
+          }
+          const direction = event.inputType === 'deleteContentBackward' ? 'backward' :
+            event.inputType === 'deleteContentForward' ? 'forward' : null;
+          if (direction) {
+            const image = state.selectedImage || adjacentMixedImage(state, direction);
+            if (image) { event.preventDefault(); removeMixedImage(state, image); return; }
+          }
+          if (event.inputType === 'insertParagraph' || event.inputType === 'insertLineBreak') {
+            event.preventDefault(); insertMixedText(state, '\n');
+          }
         });
         editable.focus({ preventScroll: true });
-        const range = rangeAtTextOffset(editable, position ?? characters.length);
-        const selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
+        if (position?.imageId && position.selectImage) {
+          const wrapper = [...editable.querySelectorAll(':scope > .inline-draft-image')]
+            .find(node => node.dataset.imageId === position.imageId);
+          if (wrapper) selectMixedImage(state, wrapper);
+        } else if (Number.isInteger(position?.segmentIndex)) {
+          const segment = editable.querySelectorAll(':scope > .doc-text-segment')[position.segmentIndex];
+          setDocCaret(segment, Array.from(segment.textContent).slice(0, position.textOffset || 0).join('').length);
+        } else {
+          const segment = editable.querySelector(':scope > .doc-text-segment:last-child');
+          setDocCaret(segment, segment.textContent.length);
+        }
       }
 
       // An epoch also rejects GETs started before an interaction began.
@@ -4500,6 +4660,7 @@
       }
 
       function insertPlainText(text) {
+        if (composerSelectedImage) composerCaretAtImage(composerSelectedImage, 'after');
         const range = currentEditorRange();
         range.deleteContents();
         const normalizedText = text.replace(/\r\n?/g, "\n");
@@ -4517,6 +4678,7 @@
           );
           range.collapse(true);
           selectRange(range);
+          updateDocSegments(editor);
           updateCounter();
           return;
         }
@@ -4525,6 +4687,7 @@
         range.setStart(textNode, textNode.data.length);
         range.collapse(true);
         selectRange(range);
+        updateDocSegments(editor);
         updateCounter();
       }
 
@@ -4537,21 +4700,59 @@
         imageInput.value = "";
       }
 
+      function clearComposerImageSelection() {
+        composerSelectedImage?.classList.remove('is-selected');
+        composerSelectedImage = null;
+      }
+
+      function selectComposerImage(wrapper) {
+        if (!editor.contains(wrapper)) return;
+        clearComposerImageSelection();
+        composerSelectedImage = wrapper;
+        wrapper.classList.add('is-selected');
+        editor.focus({ preventScroll: true });
+        const range = document.createRange();
+        range.selectNode(wrapper);
+        selectRange(range);
+      }
+
+      function composerCaretAtImage(wrapper, side) {
+        clearComposerImageSelection();
+        const segment = side === 'before' ? wrapper.previousElementSibling : wrapper.nextElementSibling;
+        if (segment?.classList.contains('doc-text-segment')) {
+          setDocCaret(segment, side === 'before' ? segment.textContent.length : 0);
+          rememberCaret();
+        }
+      }
+
+      function ensureComposerSegments() {
+        if (editor.querySelector(':scope > .doc-text-segment')) return;
+        const text = readDraft().content;
+        const offset = savedCaretPosition;
+        editor.replaceChildren(createDocTextSegment(text));
+        setDocCaret(editor.firstElementChild, Array.from(text).slice(0, offset).join('').length);
+        rememberCaret();
+      }
+
       function removePendingImage({ focus = true, node = pendingImageNode } = {}) {
         if (node?.isConnected) {
-          const range = document.createRange();
-          range.setStartBefore(node);
-          range.collapse(true);
+          const before = node.previousElementSibling;
+          const after = node.nextElementSibling;
           node.remove();
+          clearComposerImageSelection();
+          if (before?.classList.contains('doc-text-segment') && after?.classList.contains('doc-text-segment')) {
+            const offset = before.textContent.length;
+            before.textContent += after.textContent;
+            after.remove();
+            updateDocSegments(editor);
+            if (focus) setDocCaret(before, offset);
+          }
           const item = pendingImages.get(node.dataset.imageId);
           if (item) URL.revokeObjectURL(item.url);
           pendingImages.delete(node.dataset.imageId);
           pendingImage = [...pendingImages.values()].at(-1)?.file || null;
           pendingImageNode = [...editor.querySelectorAll('.inline-draft-image')].at(-1) || null;
-          if (focus) {
-            editor.focus();
-            selectRange(range);
-          }
+          if (focus) rememberCaret();
         } else {
           releasePendingImage();
         }
@@ -4594,6 +4795,7 @@
 
       function clearEditor() {
         editor.replaceChildren();
+        composerSelectedImage = null;
         releasePendingImage();
         composerClientKey = null;
         releasePendingAttachment();
@@ -4611,16 +4813,10 @@
 
       function rangeAtTextOffset(root, offset) {
         const range = document.createRange();
-        const leading = root.querySelector(':scope > .leading-text-slot');
-        if (offset === 0 && leading) {
-          range.setStart(leading, 0);
-          range.collapse(true);
-          return range;
-        }
         let remaining = Math.max(0, offset);
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
           acceptNode(node) {
-            return node.parentElement?.closest('.inline-draft-image, .leading-text-slot')
+            return node.parentElement?.closest('.inline-draft-image')
               ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
           },
         });
@@ -4935,6 +5131,8 @@
           return false;
         }
         releasePendingAttachment();
+        if (composerSelectedImage) composerCaretAtImage(composerSelectedImage, 'after');
+        ensureComposerSegments();
         const insertionRange = currentEditorRange().cloneRange();
 
         const originalSize = file.size;
@@ -4979,13 +5177,18 @@
         const image = document.createElement("img");
         image.src = url;
         image.alt = "待保存图片";
+        image.addEventListener('pointerdown', event => event.preventDefault());
+        image.addEventListener('click', () => queueImageTap(
+          `composer:${id}`, image.src, image.alt, image,
+          () => selectComposerImage(wrapper),
+        ));
 
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "inline-draft-remove";
         remove.textContent = "×";
         remove.setAttribute("aria-label", "移除待保存图片");
-        remove.addEventListener("mousedown", (event) => {
+        remove.addEventListener("pointerdown", (event) => {
           event.preventDefault();
         });
         remove.addEventListener("click", () => removePendingImage({ node: wrapper }));
@@ -4998,14 +5201,9 @@
           range.selectNodeContents(editor);
           range.collapse(false);
         }
-        range.deleteContents();
-        range.insertNode(wrapper);
+        insertImageAtDocCaret(editor, wrapper, range);
         pendingImageNode = wrapper;
-
-        insertionRange.setStartAfter(wrapper);
-        insertionRange.collapse(true);
-        editor.focus();
-        selectRange(insertionRange);
+        rememberCaret();
         savedCaretPosition = readDraft().images.at(-1)?.position ?? 0;
         updateCounter();
         if (prepared.compressed) {
@@ -5054,6 +5252,7 @@
       }
 
       editor.addEventListener("input", () => {
+        updateDocSegments(editor);
         rememberCaret();
         updateCounter();
       });
@@ -5066,6 +5265,10 @@
         updateCounter();
       });
       editor.addEventListener("keydown", (event) => {
+        if (!editorIsComposing && ['Backspace', 'Delete'].includes(event.key)) {
+          const image = composerSelectedImage || adjacentMixedImage({editor}, event.key === 'Backspace' ? 'backward' : 'forward');
+          if (image) { event.preventDefault(); removePendingImage({node:image}); return; }
+        }
         if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
           if (event.isComposing || editorIsComposing || event.keyCode === 229) {
             return;
@@ -5122,6 +5325,18 @@
         }
       });
       editor.addEventListener("beforeinput", (event) => {
+        if (event.cancelable && !editorIsComposing) {
+          const direction = event.inputType === 'deleteContentBackward' ? 'backward' :
+            event.inputType === 'deleteContentForward' ? 'forward' : null;
+          if (direction) {
+            const image = composerSelectedImage || adjacentMixedImage({editor}, direction);
+            if (image) { event.preventDefault(); removePendingImage({node:image}); return; }
+          }
+          if (composerSelectedImage && event.inputType === 'insertText' && event.data) {
+            event.preventDefault(); insertPlainText(event.data); return;
+          }
+          if (composerSelectedImage && event.inputType.startsWith('insert')) composerCaretAtImage(composerSelectedImage, 'after');
+        }
         if (
           event.cancelable &&
           !event.isComposing &&
@@ -5140,6 +5355,9 @@
         editor.addEventListener(eventName, rememberCaret);
       }
       document.addEventListener("selectionchange", rememberCaret);
+      editor.addEventListener('click', event => {
+        if (!event.target.closest('.inline-draft-image')) clearComposerImageSelection();
+      });
       editor.addEventListener("blur", (event) => {
         rememberCaret();
         if (
@@ -5303,7 +5521,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=48", {
+            .register("/service-worker.js?v=49", {
               updateViaCache: "none",
             })
             .then(async (registration) => {
