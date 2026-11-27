@@ -27,6 +27,10 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
   const search=page.locator('#memory-search');
   await search.fill('上海 mongodb');await page.waitForFunction(()=>document.querySelector('#entry-count').textContent==='1 条匹配');
   assert.match(await page.locator('#history').innerText(),/上海 MongoDB/);assert(await page.locator('#clear-button').isHidden());
+  assert.deepEqual(await page.locator('#history .search-highlight').allTextContents(),['上海','MongoDB']);
+  assert.equal(await search.evaluate(node=>getComputedStyle(node).fontSize),'14px');
+  await search.fill('a.*');await page.waitForFunction(()=>document.querySelector('#history .search-highlight')?.textContent==='a.*');
+  assert.deepEqual(await page.locator('#history .search-highlight').allTextContents(),['a.*']);
   await search.fill('.*不存在');await page.getByText('没有找到匹配的记忆',{exact:true}).waitFor();
   await page.locator('#clear-search').click();await page.waitForFunction(()=>document.querySelectorAll('#history article').length===3);assert(await page.locator('#clear-button').isVisible());
   // A delayed old search response must not replace a newer query's results.
@@ -36,6 +40,7 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
   release();await sleep(200);assert.match(await page.locator('#history').innerText(),/北京会议/);assert(!/上海 MongoDB/.test(await page.locator('#history').innerText()));
   await page.unroute('**/api/entries?q=*');
   await search.fill('备份');await page.waitForFunction(()=>document.querySelectorAll('#history .todo-item').length===2);
+  assert.deepEqual(await page.locator('#history .todo-item .search-highlight').allTextContents(),['备份']);
   // Editing the matched item removes it from results while preserving the query.
   await page.getByText('检查备份',{exact:true}).click();const input=page.locator('.todo-item-text[contenteditable]');await input.fill('检查完成');await input.press('Control+Enter');
   await page.getByText('没有找到匹配的记忆',{exact:true}).waitFor();assert.equal(await search.inputValue(),'备份');
@@ -43,7 +48,16 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
   const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:2});const phone=await mobile.newPage();await phone.goto(base);await phone.locator('#memory-search').fill('客户');await phone.waitForFunction(()=>document.querySelector('#entry-count').textContent==='1 条匹配');
   assert(await phone.locator('#clear-search').isVisible());assert(await phone.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
   await phone.screenshot({path:path.join(dir,'memory-search-mobile.png'),fullPage:true});
-  await mobile.close();assert.deepEqual(errors,[]);
+  await mobile.close();
+  const imageResponse=await fetch(base+'/api/images',{method:'POST',headers:{'Content-Type':'image/png','X-Filename':'sample.png','X-Content':encodeURIComponent('前缀关键词后缀'),'X-Image-Position':'0'},body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});assert(imageResponse.ok);
+  const imageId=(await imageResponse.json()).entry.id;
+  await search.fill('关键词');await page.waitForFunction(()=>document.querySelector('#history .image-caption .search-highlight')?.textContent==='关键词');
+  await page.locator('#history .image-caption .search-highlight').click();
+  await page.locator('#history .mixed-inline-editor').waitFor();
+  assert.equal(await page.locator('#history .mixed-inline-editor .search-highlight').count(),0);
+  await page.locator('#history .mixed-inline-editor').press('Escape');
+  assert.equal((await (await fetch(base+'/api/entries?q='+encodeURIComponent('关键词'))).json()).entries.find(item=>item.id===imageId).content,'前缀关键词后缀');
+  assert.deepEqual(errors,[]);
   console.log('PASS: desktop/mobile search, keyword combinations, clear, empty result, complete todo list, stale-response guard, live edits, no horizontal overflow');
  }finally{
   if(browser)await browser.close();server.kill();await new Promise(r=>server.once('exit',r));

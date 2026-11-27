@@ -1861,10 +1861,13 @@
         .todo-mode-button { grid-column: auto; }
         .composer-tools .hint { grid-column: 1 / -1; }
       }
-      .memory-search { display:flex; gap:10px; align-items:center; margin:0 0 18px; }
-      .memory-search input { flex:1; min-width:0; width:100%; padding:12px 14px; font:inherit; color:inherit; background:rgba(255,255,255,.7); border:1px solid rgba(100,116,139,.25); border-radius:12px; }
-      .memory-search input:focus { outline:2px solid #779b90; outline-offset:2px; }
-      .memory-search button { flex-shrink:0; }
+      .memory-search { display:flex; gap:8px; align-items:center; margin:0 0 18px; }
+      .memory-search input { flex:1; min-width:0; width:100%; min-height:42px; padding:9px 13px; font:inherit; font-size:14px; color:#26384b; background:rgba(255,255,255,.84); border:1px solid rgba(82,119,155,.27); border-radius:13px; box-shadow:inset 0 1px 2px rgba(39,74,109,.04); }
+      .memory-search input::placeholder { color:#708299; }
+      .memory-search input:focus { outline:2px solid rgba(0,122,255,.45); outline-offset:1px; border-color:#478fdf; background:#fff; }
+      .memory-search button { flex-shrink:0; min-height:42px; font-size:13px; }
+      .search-highlight { color:#343015; background:#fff0a6; border-radius:3px; box-shadow:0 0 0 2px #fff0a6; }
+      .search-file-match { display:block; margin:8px 0; color:#526477; font-size:13px; }
       [hidden] { display:none !important; }
     </style>
   </head>
@@ -2170,9 +2173,26 @@
       const clearSearch = document.querySelector('#clear-search');
       let searchTimer, searchComposing = false, entryRequestSequence = 0;
       function searchQuery() { return searchInput.value.trim(); }
+      function searchTerms() { return [...new Set(searchQuery().split(/\s+/).filter(Boolean))]; }
+      function appendSearchText(node, value) {
+        const terms = searchTerms();
+        if (!terms.length || !value) { node.textContent = value; return; }
+        const pattern = new RegExp(terms.sort((a, b) => b.length - a.length)
+          .map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'giu');
+        let offset = 0;
+        for (const match of value.matchAll(pattern)) {
+          if (match.index > offset) node.append(document.createTextNode(value.slice(offset, match.index)));
+          const mark = document.createElement('mark');
+          mark.className = 'search-highlight';
+          mark.textContent = match[0];
+          node.append(mark);
+          offset = match.index + match[0].length;
+        }
+        if (offset < value.length) node.append(document.createTextNode(value.slice(offset)));
+      }
       function matchesSearch(entry) {
         const terms = searchQuery().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-        const fields = [entry.content || '', entry.filename || '', ...(entry.items || []).map(item => item.content)].map(value => value.toLocaleLowerCase());
+        const fields = [entry.content || '', entry.filename || '', ...(entry.images || []).map(image => image.filename || ''), ...(entry.items || []).map(item => item.content)].map(value => value.toLocaleLowerCase());
         return terms.every(term => fields.some(field => field.includes(term)));
       }
       function scheduleSearch() {
@@ -2987,13 +3007,16 @@
           const caption = document.createElement('pre');
           caption.className = 'image-caption';
           caption.dataset.entryId = String(entry.id);
-          caption.textContent = text;
+          appendSearchText(caption, text);
           caption.tabIndex = 0;
           caption.addEventListener('click', event => {
             let position = Array.from(text).length;
             const point = document.caretPositionFromPoint?.(event.clientX, event.clientY);
             if (point?.offsetNode && caption.contains(point.offsetNode)) {
-              position = Array.from(point.offsetNode.textContent.slice(0, point.offset)).length;
+              const before = document.createRange();
+              before.selectNodeContents(caption);
+              before.setEnd(point.offsetNode, point.offset);
+              position = Array.from(before.toString()).length;
             }
             startMixedEdit(entry, root, editButton, { segmentIndex, textOffset: position });
           });
@@ -3005,6 +3028,15 @@
         for (const [index, image] of (entry.images || []).entries()) {
           const position = Math.max(offset, Math.min(image.position, characters.length));
           appendText(characters.slice(offset, position).join(''), offset, index);
+          if (searchTerms().some(term => (image.filename || '').toLocaleLowerCase().includes(term.toLocaleLowerCase()))) {
+            const filename = document.createElement('span');
+            filename.className = 'search-file-match';
+            filename.append(document.createTextNode('匹配文件名：'));
+            const name = document.createElement('span');
+            appendSearchText(name, image.filename || '');
+            filename.append(name);
+            root.append(filename);
+          }
           const imageBlock = document.createElement('div');
           imageBlock.className = 'document-image';
           imageBlock.tabIndex = 0;
@@ -3278,6 +3310,7 @@
         const state = { entryId, itemId, row, input: node, error,
           original: item ? item.content : entry.content, composing: false, saving: null, controller };
         inlineTodoEdit = state;
+        node.textContent = state.original;
         row?.classList.add('is-editing');
         node.classList.add('original-text-editing');
         enablePlainTextEditing(node);
@@ -3373,7 +3406,8 @@
         const restoreFocus = document.activeElement === state.input;
         state.controller.abort();
         inlineTodoEdit = null;
-        state.input.textContent = content;
+        state.input.replaceChildren();
+        appendSearchText(state.input, content);
         state.input.removeAttribute('contenteditable');
         state.input.classList.remove('original-text-editing');
         for (const attribute of ['role', 'aria-label', 'aria-multiline', 'aria-describedby', 'aria-invalid', 'aria-busy']) {
@@ -4292,7 +4326,7 @@
             fileInfo.style.minWidth = "0";
             const filename = document.createElement("p");
             filename.className = "file-name";
-            filename.textContent = entry.filename || "附件";
+            appendSearchText(filename, entry.filename || "附件");
             const size = document.createElement("span");
             size.className = "file-size";
             size.textContent = formatBytes(entry.size_bytes || 0);
@@ -4302,7 +4336,7 @@
             if (entry.content) {
               const note = document.createElement("pre");
               note.dataset.entryId = String(entry.id);
-              note.textContent = entry.content;
+              appendSearchText(note, entry.content);
               attachmentContent.append(note);
             }
             edit.addEventListener("click", () =>
@@ -4330,7 +4364,7 @@
               itemNode.classList.toggle("completed", item.stage === 5);
               const text = document.createElement("p");
               text.className = "todo-item-text";
-              text.textContent = item.content;
+              appendSearchText(text, item.content);
               const picker = createStagePicker(
                 item.stage,
                 (stage, currentPicker) => {
@@ -4366,7 +4400,7 @@
 
             const content = document.createElement("pre");
             content.dataset.entryId = String(entry.id);
-            content.textContent = entry.content;
+            appendSearchText(content, entry.content);
 
             content.tabIndex = 0;
             content.addEventListener("click", (event) => beginOriginalEdit(entry.id, null, content, null, event));
@@ -5521,7 +5555,7 @@
         });
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js?v=49", {
+            .register("/service-worker.js?v=50", {
               updateViaCache: "none",
             })
             .then(async (registration) => {
